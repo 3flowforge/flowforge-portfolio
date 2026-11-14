@@ -1,0 +1,10 @@
+[
+  {"supplier": "Bright Packaging Ltd", "invoice_no": "BP-2291", "date": "2026-10-03", "currency": "USD",
+   "lines": [{"desc": "Shipping box 30x20x15", "qty": 500, "unit_price": 0.42}, {"desc": "Tape roll", "qty": 40, "unit_price": 1.1}],
+   "tax_rate": 0.08},
+  {"supplier": "PetFab Supplies", "invoice_no": "PF-0187", "date": "2026-10-07", "currency": "USD",
+   "lines": [{"desc": "Sisal rope 50m", "qty": 30, "unit_price": 6.5}], "tax_rate": 0.0},
+  {"supplier": "Nordic Print Co", "invoice_no": "NP-7710", "date": "2026-10-12", "currency": "EUR",
+   "lines": [{"desc": "Product labels", "qty": 2000, "unit_price": 0.03}, {"desc": "Design fee", "qty": 1, "unit_price": 45}],
+   "tax_rate": 0.21, "note": "total intentionally wrong for validation test: 120.00"}
+]
