@@ -1,0 +1,122 @@
+{
+  "name": "portfolio-invoice-extractor-starter",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "invoice_text",
+              "value": "INVOICE BP-2291\nBright Packaging Ltd\nDate: 2026-10-03\nShipping box 30x20x15  500 x 0.42 = 210.00\nTape roll  40 x 1.10 = 44.00\nSubtotal 254.00 USD\nTax 8% 20.32\nTOTAL 274.32 USD",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a2",
+      "name": "Sample Invoice",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1024, system: \"You extract invoice data. Return ONLY valid JSON matching this schema: {\\\"supplier\\\": string, \\\"invoice_no\\\": string, \\\"date\\\": \\\"YYYY-MM-DD\\\", \\\"currency\\\": string, \\\"lines\\\": [{\\\"desc\\\": string, \\\"qty\\\": number, \\\"unit_price\\\": number}], \\\"subtotal\\\": number, \\\"tax\\\": number, \\\"total\\\": number}. Use null for missing fields. No commentary.\", messages: [{ role: 'user', content: $json.invoice_text }] }) }}",
+        "options": {}
+      },
+      "id": "a3",
+      "name": "Claude – Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude reply and validate totals\nconst text = $json.content?.[0]?.text ?? '';\nlet data;\ntry {\n  data = JSON.parse(text.replace(/^```json\\s*|```$/g, '').trim());\n} catch (e) {\n  return [{ json: { status: 'parse_error', raw: text } }];\n}\nconst lineSum = (data.lines || []).reduce((s, l) => s + (l.qty || 0) * (l.unit_price || 0), 0);\nconst expected = lineSum + (data.tax || 0);\nconst diff = data.total ? Math.abs(expected - data.total) / data.total : 1;\nreturn [{ json: { ...data, line_sum: Math.round(lineSum * 100) / 100, status: diff <= 0.01 ? 'ok' : 'needs_review' } }];\n"
+      },
+      "id": "a4",
+      "name": "Parse & Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Sample Invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample Invoice": {
+      "main": [
+        [
+          {
+            "node": "Claude – Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude – Extract": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
