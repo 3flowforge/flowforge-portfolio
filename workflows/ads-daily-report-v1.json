@@ -1,0 +1,161 @@
+{
+  "name": "portfolio-ads-daily-report-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "t1",
+      "name": "Run Now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "t2",
+      "name": "Every Day 8 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const csv = `date,campaign,spend_usd,clicks,purchases,revenue_usd\n2026-11-07,Cat Tree - Broad,42.10,310,3,186.00\n2026-11-07,Retargeting 30d,18.50,95,4,212.00\n2026-11-08,Cat Tree - Broad,45.30,298,2,124.00\n2026-11-08,Retargeting 30d,17.90,88,3,159.00\n2026-11-09,Cat Tree - Broad,40.00,322,4,248.00\n2026-11-09,Retargeting 30d,19.20,101,5,265.00\n2026-11-10,Cat Tree - Broad,44.80,305,1,62.00\n2026-11-10,Retargeting 30d,18.00,90,4,212.00\n2026-11-11,Cat Tree - Broad,43.50,315,3,186.00\n2026-11-11,Retargeting 30d,18.70,97,3,159.00\n2026-11-12,Cat Tree - Broad,46.20,290,2,124.00\n2026-11-12,Retargeting 30d,19.10,99,5,265.00\n2026-11-13,Cat Tree - Broad,41.90,308,3,186.00\n2026-11-13,Retargeting 30d,18.30,93,4,212.00`;\n// Sample Meta Ads rows for 7 days. Replace this node with an HTTP Request to the Meta Insights API later.\nconst [header, ...lines] = csv.trim().split('\\n');\nconst keys = header.split(',');\nreturn lines.map(line => {\n  const v = line.split(',');\n  const row = Object.fromEntries(keys.map((k, i) => [k, v[i]]));\n  for (const k of ['spend_usd', 'clicks', 'purchases', 'revenue_usd']) row[k] = Number(row[k]);\n  return { json: row };\n});\n"
+      },
+      "id": "c1",
+      "name": "Sample Ads Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ],
+      "notes": "Demo data (7 days, 2 campaigns). Replace with HTTP Request to Meta Insights API: level=campaign, date_preset=last_7d, fields=spend,clicks,actions,action_values.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// KPIs per campaign: latest day vs average of previous days\nconst rows = $input.all().map(i => i.json);\nconst dates = [...new Set(rows.map(r => r.date))].sort();\nconst latest = dates.at(-1);\nconst prevDates = new Set(dates.slice(0, -1));\nconst sum = (arr, k) => arr.reduce((s, r) => s + r[k], 0);\nconst r2 = n => n === null ? null : Math.round(n * 100) / 100;\nconst campaigns = [...new Set(rows.map(r => r.campaign))];\nreturn campaigns.map(c => {\n  const day = rows.filter(r => r.campaign === c && r.date === latest);\n  const hist = rows.filter(r => r.campaign === c && prevDates.has(r.date));\n  const spend = sum(day, 'spend_usd'), revenue = sum(day, 'revenue_usd'), purchases = sum(day, 'purchases');\n  const hSpend = sum(hist, 'spend_usd'), hRev = sum(hist, 'revenue_usd'), hPurch = sum(hist, 'purchases');\n  const roas = spend ? revenue / spend : 0;\n  const roasAvg = hSpend ? hRev / hSpend : 0;\n  return { json: {\n    date: latest, campaign: c,\n    spend: r2(spend), revenue: r2(revenue), purchases,\n    roas: r2(roas), roas_avg_prev: r2(roasAvg),\n    roas_change_pct: roasAvg ? r2((roas - roasAvg) / roasAvg * 100) : null,\n    cpa: purchases ? r2(spend / purchases) : null,\n    cpa_avg_prev: hPurch ? r2(hSpend / hPurch) : null,\n    prev_days: prevDates.size,\n  } };\n});\n"
+      },
+      "id": "c2",
+      "name": "Compute KPIs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the report text + one rule-based recommendation (swap for a Claude node once the API is set up)\nconst k = $input.all().map(i => i.json);\nconst date = k[0].date;\nconst spend = k.reduce((s, x) => s + x.spend, 0);\nconst revenue = k.reduce((s, x) => s + x.revenue, 0);\nconst orders = k.reduce((s, x) => s + x.purchases, 0);\nconst roas = spend ? revenue / spend : 0;\nconst fmt = n => (n === null || n === undefined) ? '-' : n.toFixed(2);\nconst arrow = p => p === null ? '' : (p >= 0 ? ` (+${p.toFixed(0)}% vs ${k[0].prev_days}-day avg)` : ` (${p.toFixed(0)}% vs ${k[0].prev_days}-day avg)`);\n\nconst lines = k\n  .sort((a, b) => b.roas - a.roas)\n  .map(x => `- ${x.campaign}: spend $${fmt(x.spend)}, ROAS ${fmt(x.roas)}${arrow(x.roas_change_pct)}, CPA $${fmt(x.cpa)}`);\n\nconst worst = k.at(-1);\nconst rising = k.filter(x => x.roas_change_pct !== null).sort((a, b) => b.roas_change_pct - a.roas_change_pct)[0];\nlet rec;\nif (worst.roas < 2) rec = `Cut \"${worst.campaign}\" budget by 20% and test a new creative (ROAS ${fmt(worst.roas)} is under 2.0).`;\nelse if (rising && rising.roas_change_pct >= 10) rec = `Scale \"${rising.campaign}\" by 15-20%: ROAS is up ${rising.roas_change_pct.toFixed(0)}% vs the recent average.`;\nelse rec = `Hold budgets: all campaigns are above ROAS 2.0 with no strong upward trend.`;\n\nconst report_text = [\n  `Daily Ads Report - ${date}`,\n  `Spend $${fmt(spend)} | Revenue $${fmt(revenue)} | Orders ${orders} | ROAS ${fmt(roas)}`,\n  ``,\n  `By campaign:`,\n  ...lines,\n  ``,\n  `Recommendation: ${rec}`,\n].join('\\n');\n\nreturn [{ json: { date, total_spend: +fmt(spend), total_revenue: +fmt(revenue), orders, roas: +fmt(roas), recommendation: rec, report_text } }];\n"
+      },
+      "id": "c3",
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        100
+      ],
+      "notes": "Rule-based recommendation. Later: send KPIs to Claude for a written summary.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (String(($json.report_text) ?? '')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      },
+      "id": "o1",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        100
+      ],
+      "disabled": true,
+      "notes": "Disabled. To enable: create a bot with @BotFather, add Telegram credential, set Chat ID.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Run Now": {
+      "main": [
+        [
+          {
+            "node": "Sample Ads Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Day 8 AM": {
+      "main": [
+        [
+          {
+            "node": "Sample Ads Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample Ads Data": {
+      "main": [
+        [
+          {
+            "node": "Compute KPIs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute KPIs": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

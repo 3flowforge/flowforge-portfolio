@@ -1,0 +1,730 @@
+{
+  "name": "portfolio-booking-bot-ai-v1",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "authentication": "none",
+        "initialMessages": "Welcome to Smile Dental Clinic!\nTell me what you need and when, in your own words.\nFor example: \"cleaning next Tuesday afternoon\".",
+        "options": {
+          "title": "Smile Dental - AI Booking Assistant",
+          "subtitle": "Understands natural language - demo by 03 Flow Forge",
+          "inputPlaceholder": "e.g. Can I come in Friday morning for whitening?",
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "31cdded2-cb5f-4845-9514-4931ce41be09",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "a6600d4d-1ab2-4f8d-bfa8-1b21e413bf74"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Choose the AI provider. Default below; switch per message with /claude, /deepseek or /gemini.\nconst DEFAULT_PROVIDER = 'deepseek';\nconst NAMES = { claude: 'Claude', deepseek: 'DeepSeek', gemini: 'Gemini' };\nconst j = $input.first().json;\nlet text = String(j.chatInput || '').trim();\nlet provider = DEFAULT_PROVIDER;\nconst m = text.match(/^\\/(claude|deepseek|gemini)\\b\\s*/i);\nif (m) { provider = m[1].toLowerCase(); text = text.slice(m[0].length) || 'hi'; }\nreturn [{ json: { sessionId: j.sessionId, chatInput: text, provider, provider_name: NAMES[provider] } }];"
+      },
+      "id": "91cb0132-2635-4703-8ea5-df114c31bb28",
+      "name": "Pick AI Provider",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "KO4C4P5jAvwUxDhb",
+          "mode": "list",
+          "cachedResultName": "booking_sessions",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/KO4C4P5jAvwUxDhb"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "sessionId",
+              "condition": "eq",
+              "keyValue": "={{ $json.sessionId }}"
+            }
+          ]
+        }
+      },
+      "id": "e86120c6-b89d-49fa-9162-65a3282b53e1",
+      "name": "Load Session",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "33dOMJYtL27KUK5O",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/33dOMJYtL27KUK5O"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "booked"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "28db9359-e0ca-4d38-9c3b-5df815403cc4",
+      "name": "Load Booked Slots",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Pick AI Provider').first().json.chatInput }}",
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"intent\": {\n      \"type\": \"string\",\n      \"description\": \"One of: book (wants an appointment or gives booking details), confirm (agrees: yes, ok, sounds good), deny (says no to the proposed booking or wants to change), question (asks about hours, prices, services, location), greeting, other\"\n    },\n    \"service\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"description\": \"One of: checkup (check-up, cleaning, scale and polish), whitening (teeth whitening, bleaching), emergency (pain, broken tooth, swelling, urgent). Null if not mentioned.\"\n    },\n    \"date\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"description\": \"Requested day as YYYY-MM-DD, resolving words like tomorrow, next Tuesday, Friday, the 20th using today's date. Null if not mentioned.\"\n    },\n    \"time_of_day\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"description\": \"morning, afternoon or evening if mentioned, else null\"\n    },\n    \"exact_time\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"description\": \"Requested clock time as HH:mm in 24h format (e.g. 2pm = 14:00). Null if not mentioned.\"\n    },\n    \"option_number\": {\n      \"type\": [\n        \"integer\",\n        \"null\"\n      ],\n      \"description\": \"If the patient picks one of the numbered options (e.g. 'the second one', '3'), its number. Else null.\"\n    },\n    \"name\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"description\": \"Patient full name if given, else null\"\n    },\n    \"phone\": {\n      \"type\": [\n        \"string\",\n        \"null\"\n      ],\n      \"description\": \"Phone number if given, else null\"\n    }\n  },\n  \"required\": [\n    \"intent\"\n  ]\n}",
+        "options": {
+          "systemPromptTemplate": "=You extract booking details for a dental clinic chat. The patient may write in any language.\nToday is {{ $now.setZone('America/Chicago').toFormat('cccc, yyyy-LL-dd') }} (clinic time zone America/Chicago). Resolve relative dates against today. 'Next <weekday>' means that weekday in the coming week.\nThe assistant's previous message was: \"{{ ($('Load Session').all().map(i => i.json).find(r => r.sessionId === $('Pick AI Provider').first().json.sessionId) || {}).state ? JSON.parse(($('Load Session').all().map(i => i.json).find(r => r.sessionId === $('Pick AI Provider').first().json.sessionId)).state).last_reply || '' : '' }}\"\nUse it to understand short replies such as 'yes', 'the first one' or 'Tuesday'.\nOnly extract what the patient actually said in the latest message. Use null for anything not mentioned. Never guess a name or phone number."
+        }
+      },
+      "id": "a94cccd6-acd2-456d-838a-a6939530117d",
+      "name": "Understand Message",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        100
+      ],
+      "executeOnce": true,
+      "notes": "AI turns free text into structured fields. It never picks the slot itself.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 3,
+        "rules": {
+          "rule": [
+            {
+              "modelIndex": 1,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0deb4b22-80d7-4a5d-990b-f6adaed9160a",
+                    "leftValue": "={{ $('Pick AI Provider').first().json.provider }}",
+                    "rightValue": "claude",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "modelIndex": 2,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "c178957f-8e67-44b6-84ab-b77491a4c670",
+                    "leftValue": "={{ $('Pick AI Provider').first().json.provider }}",
+                    "rightValue": "deepseek",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "modelIndex": 3,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "bfb18fac-aa28-48e9-ba16-fc8ff02b841f",
+                    "leftValue": "={{ $('Pick AI Provider').first().json.provider }}",
+                    "rightValue": "gemini",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        }
+      },
+      "id": "0c6fb1be-e782-456a-a757-8a9b17edd441",
+      "name": "Model Selector",
+      "type": "@n8n/n8n-nodes-langchain.modelSelector",
+      "typeVersion": 1,
+      "position": [
+        860,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5-5"
+        },
+        "options": {
+          "maxTokensToSample": 400,
+          "temperature": 0
+        }
+      },
+      "id": "328daa6c-ef7c-48e3-8bb7-6967b4b307e5",
+      "name": "Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        700,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "maxTokens": 400,
+          "temperature": 0
+        }
+      },
+      "id": "6d53257c-fc2c-4594-9ece-4170fa278b2b",
+      "name": "DeepSeek",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        880,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash",
+        "options": {
+          "maxOutputTokens": 2048,
+          "temperature": 0
+        }
+      },
+      "id": "9702e5e1-765b-4cef-b588-146bdef42a1a",
+      "name": "Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1060,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Booking logic: the AI only UNDERSTANDS the message; this code decides slots, so the bot can never double-book.\nconst CLINIC = { name: 'Smile Dental Clinic', tz: 'America/Chicago', tzLabel: 'Central Time', hours: [9, 10, 11, 13, 14, 15, 16], searchDays: 10,\n  info: 'Smile Dental Clinic is open Monday to Friday, 9 AM to 5 PM Central Time (lunch 12-1 PM).' };\nconst SERVICES = { checkup: { label: 'Check-up & cleaning', minutes: 45, price: 120 }, whitening: { label: 'Teeth whitening', minutes: 60, price: 350 }, emergency: { label: 'Emergency visit', minutes: 30, price: 90 } };\nconst menu = () => Object.values(SERVICES).map((s, i) => `${i + 1}. ${s.label} (${s.minutes} min, from $${s.price})`).join('\\n');\n\nconst p = $('Pick AI Provider').first().json;\nconst sessionId = p.sessionId;\nconst ai = ($('Understand Message').first().json.output) || {};\nconst row = $('Load Session').all().map(i => i.json).find(r => r.sessionId === sessionId);\nlet s = row && row.state ? JSON.parse(row.state) : { step: 'collect' };\nconst booked = new Set($('Load Booked Slots').all().map(i => i.json).filter(r => r.status === 'booked' && r.start_iso).map(r => r.start_iso));\nconst now = DateTime.now().setZone(CLINIC.tz);\nconst clean = v => (v === null || v === undefined || v === '' || v === 'null') ? null : v;\n\n// --- free slots matching the patient's preference ---\nfunction slots({ date, tod, time }, limit) {\n  const out = [];\n  let day = date ? DateTime.fromISO(date, { zone: CLINIC.tz }).startOf('day') : now.startOf('day').plus({ days: 1 });\n  if (day < now.startOf('day')) day = now.startOf('day');\n  for (let d = 0; d < CLINIC.searchDays && out.length < limit; d++, day = day.plus({ days: 1 })) {\n    if (day.weekday > 5) continue;\n    let hours = CLINIC.hours;\n    if (tod === 'morning') hours = hours.filter(h => h < 12);\n    if (tod === 'afternoon' || tod === 'evening') hours = hours.filter(h => h >= 13);\n    if (time) { const h = parseInt(time, 10); hours = [...hours].sort((a, b) => Math.abs(a - h) - Math.abs(b - h)); }\n    for (const h of hours) {\n      const t = day.set({ hour: h, minute: 0, second: 0, millisecond: 0 });\n      if (t <= now.plus({ hours: 2 })) continue;\n      const iso = t.toUTC().toISO();\n      if (!booked.has(iso)) out.push({ iso, label: t.toFormat('ccc d LLL, h:mm a') });\n      if (out.length >= limit) break;\n    }\n  }\n  return out;\n}\n\n// --- merge what the AI understood ---\nconst intent = clean(ai.intent) || 'other';\nif (s.step === 'done' && intent === 'book') s = { step: 'collect', name: s.name, phone: s.phone };\nfor (const k of ['service', 'date', 'time_of_day', 'exact_time', 'name', 'phone']) {\n  const v = clean(ai[k]);\n  if (v !== null) {\n    const key = k === 'time_of_day' ? 'tod' : k === 'exact_time' ? 'time' : k;\n    if (['date', 'tod', 'time'].includes(key) && s[key] !== v) { s.slot = null; s.offered = null; if (s.step === 'confirm') s.step = 'collect'; }\n    s[key] = v;\n  }\n}\n// a new part-of-day without a new exact time replaces the old exact time\nif (clean(ai.time_of_day) !== null && clean(ai.exact_time) === null) s.time = null;\nconst askedExact = clean(ai.exact_time) !== null;\nconst askedDate = clean(ai.date) !== null;\nif (s.phone) { const d = String(s.phone).replace(/\\D/g, ''); s.phone = d.length >= 9 ? '+' + (d.length === 10 ? '1' + d : d) : null; }\nif (s.service && !SERVICES[s.service]) s.service = null;\n\nlet reply = '';\nlet booking = null;\n\nif (intent === 'question' && s.step !== 'confirm') {\n  reply = CLINIC.info + '\\nServices:\\n' + menu() + '\\n\\nWould you like to book a visit? Just tell me what and when, e.g. \"a cleaning next Tuesday afternoon\".';\n} else if (s.step === 'done') {\n  reply = `Your ${SERVICES[s.service].label} is booked for ${s.slot.label} (${CLINIC.tzLabel}). Say \"book another\" to make a new appointment, or call us to change it.`;\n} else if (s.step === 'confirm' && intent === 'confirm') {\n  if (booked.has(s.slot.iso)) { s.slot = null; s.step = 'collect'; reply = 'Sorry, that time was just taken. '; }\n  else {\n    booking = { sessionId, patient_name: s.name, phone: s.phone, service: SERVICES[s.service].label, start_iso: s.slot.iso, start_label: s.slot.label, status: 'booked', reminded: false };\n    s.step = 'done';\n    reply = `You're booked! ${SERVICES[s.service].label} on ${s.slot.label} (${CLINIC.tzLabel}). We'll send a reminder 24 hours before. See you soon, ${String(s.name).split(' ')[0]}!`;\n  }\n} else if (s.step === 'confirm' && intent === 'deny') {\n  s.slot = null; s.offered = null; s.step = 'collect';\n  reply = 'No problem. What day or time would suit you better?';\n}\n\nif (!reply) {\n  // pick from offered list (\"the second one\", \"2\", \"10am works\")\n  const opt = parseInt(clean(ai.option_number), 10);\n  if (!s.slot && s.offered && opt >= 1 && opt <= s.offered.length) s.slot = s.offered[opt - 1];\n  if (!s.slot && s.offered && s.time) { const hit = s.offered.find(o => DateTime.fromISO(o.iso).setZone(CLINIC.tz).hour === parseInt(s.time, 10) && (!s.date || DateTime.fromISO(o.iso).setZone(CLINIC.tz).toISODate() === s.date)); if (hit) s.slot = hit; }\n  if (s.slot && booked.has(s.slot.iso)) s.slot = null;\n\n  if (!s.service) {\n    reply = (intent === 'greeting' || !s.date ? `Hi! I'm the booking assistant for ${CLINIC.name}. ` : '') + 'What would you like to book?\\n' + menu();\n  } else if (!s.slot) {\n    const want = { date: s.date, tod: s.tod, time: s.time };\n    const list = slots(want, 4);\n    const exact = s.time && s.date && list.find(o => { const t = DateTime.fromISO(o.iso).setZone(CLINIC.tz); return t.toISODate() === s.date && t.hour === parseInt(s.time, 10); });\n    if (exact) { s.slot = exact; }\n    else if (!list.length) { reply = 'Sorry, nothing is free around then. Could you suggest another day?'; }\n    else {\n      s.offered = list;\n      const asked = s.date ? DateTime.fromISO(s.date, { zone: CLINIC.tz }).toFormat('cccc d LLL') : null;\n      const sameDay = asked && list.some(o => DateTime.fromISO(o.iso).setZone(CLINIC.tz).toISODate() === s.date);\n      reply = ((askedExact && s.time) ? 'That exact time is not available. ' : (askedDate && asked && !sameDay) ? 'Nothing is free on ' + asked + '. ' : '') + `Here are the closest free times for ${SERVICES[s.service].label} (${CLINIC.tzLabel}):\\n` + list.map((o, i) => `${i + 1}. ${o.label}`).join('\\n') + '\\n\\nWhich one works for you?';\n    }\n  }\n  if (!reply && s.slot) {\n    if (!s.name) reply = `${s.slot.label} is free. May I have your full name?`;\n    else if (!s.phone) reply = `Thanks, ${String(s.name).split(' ')[0]}. What's the best phone number for your reminder?`;\n    else { s.step = 'confirm'; reply = `Please confirm:\\n- ${SERVICES[s.service].label}\\n- ${s.slot.label} (${CLINIC.tzLabel})\\n- ${s.name}, ${s.phone}\\n\\nShall I book it?`; }\n  }\n}\n\ns.last_reply = reply;\nreturn [{ json: { sessionId, state: JSON.stringify(s), output: reply, booking_created: !!booking, understood: ai, ...(booking || {}) } }];\n"
+      },
+      "id": "19f20171-cf92-4f40-ada3-f746316be5ff",
+      "name": "Booking Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        100
+      ],
+      "notes": "Deterministic: finds free slots, prevents double booking, asks for what is missing.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "KO4C4P5jAvwUxDhb",
+          "mode": "list",
+          "cachedResultName": "booking_sessions",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/KO4C4P5jAvwUxDhb"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "sessionId",
+              "condition": "eq",
+              "keyValue": "={{ $json.sessionId }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sessionId": "={{ $json.sessionId }}",
+            "state": "={{ $json.state }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "state",
+              "displayName": "state",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "11b1379d-f60c-487d-880c-216ed74b2a08",
+      "name": "Save Session",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e8962ffc-c1a1-42ff-837e-36982527f2e6",
+              "leftValue": "={{ $('Booking Logic').item.json.booking_created }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "76609783-d566-4003-905a-a4b1ee58f648",
+      "name": "New Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1560,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "33dOMJYtL27KUK5O",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/33dOMJYtL27KUK5O"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sessionId": "={{ $('Booking Logic').item.json.sessionId }}",
+            "patient_name": "={{ $('Booking Logic').item.json.patient_name }}",
+            "phone": "={{ $('Booking Logic').item.json.phone }}",
+            "service": "={{ $('Booking Logic').item.json.service }}",
+            "start_iso": "={{ $('Booking Logic').item.json.start_iso }}",
+            "start_label": "={{ $('Booking Logic').item.json.start_label }}",
+            "status": "={{ $('Booking Logic').item.json.status }}",
+            "reminded": "={{ $('Booking Logic').item.json.reminded }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "patient_name",
+              "displayName": "patient_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "service",
+              "displayName": "service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "start_iso",
+              "displayName": "start_iso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "start_label",
+              "displayName": "start_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "reminded",
+              "displayName": "reminded",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b524ec0f-2479-46ab-94cc-6bbd3572ce1d",
+      "name": "Save Appointment",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ ('NEW BOOKING (AI bot)\\n' + $('Booking Logic').item.json.patient_name + ' (' + $('Booking Logic').item.json.phone + ')\\n' + $('Booking Logic').item.json.service + '\\n' + $('Booking Logic').item.json.start_label + ' (Central Time)').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "e46bc15e-29dc-410b-a1de-1eb9a185d9f8",
+      "name": "Notify Clinic (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "05765a6d-bd20-411c-8174-384035dce69b",
+              "name": "output",
+              "value": "={{ $('Booking Logic').first().json.output + '\\n\\n_(understood by ' + $('Pick AI Provider').first().json.provider_name + ')_' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "64286483-4522-4a0a-80c4-842b4253cdec",
+      "name": "Reply (booked)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "684778f0-221f-4183-a7e5-e2d767daaa9f",
+              "name": "output",
+              "value": "={{ $('Booking Logic').first().json.output + '\\n\\n_(understood by ' + $('Pick AI Provider').first().json.provider_name + ')_' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fda6a467-3dfd-42fb-92c3-cea2201abeae",
+      "name": "Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1780,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pick AI Provider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick AI Provider": {
+      "main": [
+        [
+          {
+            "node": "Load Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Session": {
+      "main": [
+        [
+          {
+            "node": "Load Booked Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Booked Slots": {
+      "main": [
+        [
+          {
+            "node": "Understand Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Understand Message": {
+      "main": [
+        [
+          {
+            "node": "Booking Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Logic": {
+      "main": [
+        [
+          {
+            "node": "Save Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Session": {
+      "main": [
+        [
+          {
+            "node": "New Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Booking?": {
+      "main": [
+        [
+          {
+            "node": "Save Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Appointment": {
+      "main": [
+        [
+          {
+            "node": "Notify Clinic (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Clinic (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Reply (booked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Model Selector",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Model Selector",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Model Selector",
+            "type": "ai_languageModel",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Model Selector": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Understand Message",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago"
+  },
+  "pinData": {}
+}

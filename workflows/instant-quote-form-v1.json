@@ -1,0 +1,349 @@
+{
+  "name": "portfolio-instant-quote-form-v1",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "get-a-quote",
+        "formTitle": "Get an instant automation quote",
+        "formDescription": "03 Flow Forge - tell us what you want to automate and see your estimate in seconds.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Your name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Work email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company"
+            },
+            {
+              "fieldLabel": "What do you want to automate?",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Single workflow (2-3 apps)"
+                  },
+                  {
+                    "option": "AI chatbot / booking bot"
+                  },
+                  {
+                    "option": "Shopify automation"
+                  },
+                  {
+                    "option": "Zapier/Make to n8n migration"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "How many apps need to connect?",
+              "fieldType": "number",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Extras",
+              "fieldType": "dropdown",
+              "multiselect": true,
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Self-hosted n8n setup"
+                  },
+                  {
+                    "option": "Monthly maintenance"
+                  },
+                  {
+                    "option": "Rush delivery (48h)"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Anything else we should know?",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9acc4d98-ddc2-49cf-b1ae-e942b309a446",
+      "name": "Quote Request Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "2ca07286-7308-4e77-b44a-0ef625549a89"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Price the request and build a branded HTML quote page.\nconst f = $input.first().json;\nconst PACKAGES = {\n  'Single workflow (2-3 apps)':         { base: 200, days: 4 },\n  'AI chatbot / booking bot':           { base: 400, days: 6 },\n  'Shopify automation':                 { base: 250, days: 5 },\n  'Zapier/Make to n8n migration':       { base: 300, days: 5 },\n};\nconst pkgName = f['What do you want to automate?'];\nconst pkg = PACKAGES[pkgName] || PACKAGES['Single workflow (2-3 apps)'];\nconst apps = Math.max(1, parseInt(f['How many apps need to connect?'], 10) || 2);\nconst extrasRaw = f['Extras'];\nconst extras = Array.isArray(extrasRaw) ? extrasRaw : (extrasRaw ? [extrasRaw] : []);\n\nconst lines = [{ item: pkgName || 'Single workflow (2-3 apps)', amount: pkg.base }];\nconst extraApps = Math.max(0, apps - 3);\nif (extraApps) lines.push({ item: `${extraApps} additional app integration(s) x $50`, amount: extraApps * 50 });\nif (extras.includes('Self-hosted n8n setup')) lines.push({ item: 'Self-hosted n8n setup (VPS, SSL, backups)', amount: 150 });\nlet oneTime = lines.reduce((s, l) => s + l.amount, 0);\nlet days = pkg.days + extraApps;\nif (extras.includes('Rush delivery (48h)')) {\n  const fee = Math.round(oneTime * 0.25);\n  lines.push({ item: 'Rush delivery (48h) +25%', amount: fee });\n  oneTime += fee;\n  days = 2;\n}\nconst monthly = extras.includes('Monthly maintenance') ? 100 : 0;\n\nconst now = DateTime.now().setZone('Asia/Ho_Chi_Minh');\nconst quoteNo = 'Q-' + now.toFormat('yyyyLLdd') + '-' + Math.floor(1000 + Math.random() * 9000);\nconst valid = now.plus({ days: 14 }).toFormat('d LLL yyyy');\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst usd = n => '$' + n.toLocaleString('en-US');\nconst name = f['Your name'], email = f['Work email'], company = f['Company'] || '';\n\nconst rows = lines.map(l => `<tr><td>${esc(l.item)}</td><td class=\"num\">${usd(l.amount)}</td></tr>`).join('');\nconst html = `<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Quote ${quoteNo} - 03 Flow Forge</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Montserrat:wght@700&family=Inter:wght@400;500;600&display=swap\" rel=\"stylesheet\">\n<style>\n:root{--navy:#2A364B;--coral:#F06E52;--coral-l:#FE8D71;--blue:#9CC3ED;--bg:#FAFBFD;--grey:#5F6A7D;--line:#E3E8F0}\n*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Inter,system-ui,sans-serif;color:var(--navy)}\n.wrap{max-width:720px;margin:32px auto;padding:0 16px}.card{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}\n.head{padding:28px 32px;border-bottom:4px solid var(--coral);display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}\n.brand{font-family:Montserrat,sans-serif;font-size:26px;letter-spacing:.5px}.brand b{color:var(--coral-l)}.tag{color:var(--grey);font-size:13px;margin-top:4px}\n.meta{text-align:right;font-size:13px;color:var(--grey)}.meta strong{display:block;color:var(--navy);font-size:15px}\n.body{padding:28px 32px}h2{font-size:18px;margin:0 0 4px}p{margin:0 0 16px;line-height:1.55}\ntable{width:100%;border-collapse:collapse;margin:8px 0 20px}td{padding:12px 0;border-bottom:1px solid var(--line);font-size:15px}.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}\n.total td{border-bottom:none;font-weight:600;font-size:18px;padding-top:16px}.total .num{color:var(--coral)}\n.pills{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}.pill{background:rgba(156,195,237,.25);border-radius:999px;padding:8px 14px;font-size:14px}\n.next{background:var(--bg);border-radius:8px;padding:16px 20px;font-size:14px;line-height:1.6}.foot{padding:16px 32px;color:var(--grey);font-size:12px;border-top:1px solid var(--line)}\n@media(max-width:560px){.meta{text-align:left}.head,.body,.foot{padding-left:20px;padding-right:20px}}\n</style></head><body><div class=\"wrap\"><div class=\"card\">\n<div class=\"head\"><div><div class=\"brand\"><b>03</b> FLOW FORGE</div><div class=\"tag\">Workflows that run while you sleep.</div></div>\n<div class=\"meta\"><strong>Quote ${quoteNo}</strong>Valid until ${valid}</div></div>\n<div class=\"body\"><h2>Hi ${esc(String(name).split(' ')[0])},</h2>\n<p>Thanks for your request${company ? ' for ' + esc(company) : ''}. Here is your estimate for <strong>${esc(pkgName)}</strong> connecting ${apps} app(s).</p>\n<table>${rows}<tr class=\"total\"><td>Total (one-time)</td><td class=\"num\">${usd(oneTime)}</td></tr></table>\n<div class=\"pills\"><span class=\"pill\">Delivery: ${days} working days</span>${monthly ? `<span class=\"pill\">Maintenance: ${usd(monthly)}/month</span>` : ''}<span class=\"pill\">Includes video handover</span></div>\n<div class=\"next\"><strong>Next steps</strong><br>1. We will email you at ${esc(email)} within 24 hours to confirm scope.<br>2. Have 2-3 real examples of your data ready for a 15-minute call.<br>3. Work starts once you accept the offer on Upwork.</div></div>\n<div class=\"foot\">Estimate only. Third-party costs (n8n Cloud, AI usage, hosting) are billed to your own accounts. 03 Flow Forge &middot; 3flowforge@gmail.com</div>\n</div></div></body></html>`;\n\nreturn [{ json: {\n  quote_no: quoteNo, name, email, company, package: pkgName, apps, extras: extras.join(', '),\n  one_time: oneTime, monthly, delivery_days: days, created_at: now.toFormat('yyyy-LL-dd HH:mm'), html,\n} }];\n"
+      },
+      "id": "f0d8fd6f-f6d8-47b2-ad02-413476c4d614",
+      "name": "Calculate Quote",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ],
+      "notes": "Edit PACKAGES and add-on prices at the top.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "quote_no": "={{ $json.quote_no }}",
+            "name": "={{ $json.name }}",
+            "email": "={{ $json.email }}",
+            "company": "={{ $json.company }}",
+            "package": "={{ $json.package }}",
+            "apps": "={{ $json.apps }}",
+            "extras": "={{ $json.extras }}",
+            "one_time": "={{ $json.one_time }}",
+            "monthly": "={{ $json.monthly }}",
+            "delivery_days": "={{ $json.delivery_days }}",
+            "created_at": "={{ $json.created_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "quote_no",
+              "displayName": "quote_no",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "package",
+              "displayName": "package",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "apps",
+              "displayName": "apps",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "extras",
+              "displayName": "extras",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "one_time",
+              "displayName": "one_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "monthly",
+              "displayName": "monthly",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "delivery_days",
+              "displayName": "delivery_days",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "94c9d00d-91af-4c68-ba42-91c7708abd1c",
+      "name": "Save Quote",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        100
+      ],
+      "notes": "Select your 'quotes' data table here.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (\"NEW QUOTE REQUEST \" + String(($('Calculate Quote').item.json.quote_no) ?? '') + \"\\n\" + String(($('Calculate Quote').item.json.name) ?? '') + \" - \" + String(($('Calculate Quote').item.json.company || 'no company') ?? '') + \" (\" + String(($('Calculate Quote').item.json.email) ?? '') + \")\\n\" + String(($('Calculate Quote').item.json.package) ?? '') + \", \" + String(($('Calculate Quote').item.json.apps) ?? '') + \" apps\\nQuoted: $\" + String(($('Calculate Quote').item.json.one_time) ?? '') + \" one-time\" + String(($('Calculate Quote').item.json.monthly ? ' + $' + $('Calculate Quote').item.json.monthly + '/month' : '') ?? '') + \"\\nFollow up within 24h.\").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "6c101418-dca3-4ef3-a1b7-67d75307f024",
+      "name": "Notify Me (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        720,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $('Calculate Quote').item.json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "538b0f84-5423-4401-bf10-25785adc5a16",
+      "name": "Show Quote Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Quote Request Form": {
+      "main": [
+        [
+          {
+            "node": "Calculate Quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Quote": {
+      "main": [
+        [
+          {
+            "node": "Save Quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Quote": {
+      "main": [
+        [
+          {
+            "node": "Notify Me (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Me (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Show Quote Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

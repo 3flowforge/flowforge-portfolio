@@ -1,0 +1,219 @@
+{
+  "name": "portfolio-booking-reminders-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ab7b3ebc-d68c-421b-9ca3-b71305cdbcb9",
+      "name": "Run Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "8af4ae7e-1cb1-4db5-84a6-403617ee27aa",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "33dOMJYtL27KUK5O",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/33dOMJYtL27KUK5O"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "booked"
+            },
+            {
+              "keyName": "reminded",
+              "condition": "isFalse"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "26b4b2f9-be24-4018-9ce5-3810cc764e2a",
+      "name": "Load Upcoming",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pick bookings that start within the reminder window and have not been reminded yet.\n// Production (schedule): 24h window. Manual test run: 48h so you can test today.\nconst WINDOW_HOURS = $execution.mode === 'production' ? 24 : 48;\nconst now = DateTime.now();\nreturn $input.all()\n  .map(i => i.json)\n  .filter(a => a.status === 'booked' && a.start_iso && !a.reminded)\n  .filter(a => {\n    const h = DateTime.fromISO(a.start_iso).diff(now, 'hours').hours;\n    return h > 0 && h <= WINDOW_HOURS;\n  })\n  .map(a => ({ json: { ...a, message: `Reminder for ${a.patient_name} (${a.phone}): ${a.service} at Smile Dental Clinic on ${a.start_label} (Central Time). Reply C to confirm or call us to reschedule.` } }));\n"
+      },
+      "id": "a62537ee-abf5-48e8-b355-4c32e73cc3bb",
+      "name": "Due Within 24h",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (String(($json.message) ?? '')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "5b606229-e449-4ee5-ad78-8fcdab204021",
+      "name": "Send Reminder (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        680,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Demo sends to the clinic chat. Production: SMS (Twilio) or WhatsApp to the patient's phone.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "33dOMJYtL27KUK5O",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/33dOMJYtL27KUK5O"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Due Within 24h').item.json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "reminded": "={{ true }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "reminded",
+              "displayName": "reminded",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "50c3d687-c056-45c0-8d69-47e89d2c1a12",
+      "name": "Mark Reminded",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        900,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Run Test": {
+      "main": [
+        [
+          {
+            "node": "Load Upcoming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Load Upcoming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Upcoming": {
+      "main": [
+        [
+          {
+            "node": "Due Within 24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due Within 24h": {
+      "main": [
+        [
+          {
+            "node": "Send Reminder (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reminder (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Mark Reminded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago"
+  },
+  "pinData": {}
+}

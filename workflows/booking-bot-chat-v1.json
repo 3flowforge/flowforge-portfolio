@@ -1,0 +1,492 @@
+{
+  "name": "portfolio-booking-bot-chat-v1",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "authentication": "none",
+        "initialMessages": "Welcome to Smile Dental Clinic!\nType anything to book a visit.",
+        "options": {
+          "title": "Smile Dental - Book a Visit",
+          "subtitle": "Booking assistant demo by 03 Flow Forge",
+          "inputPlaceholder": "Type your message...",
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "0a700222-9f95-4b1c-9c61-7710858e1e8c",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        100
+      ],
+      "webhookId": "a30ad170-2001-4782-b572-dbc8ce5b2edb",
+      "notes": "Hosted chat page = the website widget. Swap for WhatsApp/Messenger/Telegram trigger in production.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "KO4C4P5jAvwUxDhb",
+          "mode": "list",
+          "cachedResultName": "booking_sessions",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/KO4C4P5jAvwUxDhb"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "sessionId",
+              "condition": "eq",
+              "keyValue": "={{ $json.sessionId }}"
+            }
+          ]
+        }
+      },
+      "id": "5ef1f8d8-a9e6-4418-99da-968b65bf2596",
+      "name": "Load Session",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        100
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "33dOMJYtL27KUK5O",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/33dOMJYtL27KUK5O"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "booked"
+            }
+          ]
+        },
+        "returnAll": true
+      },
+      "id": "2409d9a3-569c-4031-a164-2c1bed99b632",
+      "name": "Load Booked Slots",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Booking assistant: a small state machine (no AI API needed). One message in, one reply out.\nconst CLINIC = { name: 'Smile Dental Clinic', tz: 'America/Chicago', tzLabel: 'Central Time', days: 3, hours: [9, 10, 11, 13, 14, 15, 16] };\nconst SERVICES = [\n  { label: 'Check-up & cleaning', minutes: 45, words: ['check', 'clean'] },\n  { label: 'Teeth whitening', minutes: 60, words: ['whiten', 'white'] },\n  { label: 'Emergency visit', minutes: 30, words: ['emergency', 'pain', 'urgent', 'hurt'] },\n];\n\nconst chat = $('Chat Trigger').first().json;\nconst sessionId = chat.sessionId;\nconst text = String(chat.chatInput || '').trim();\nconst lower = text.toLowerCase();\nconst row = $('Load Session').all().map(i => i.json).find(r => r.sessionId === sessionId);\nlet s = row && row.state ? JSON.parse(row.state) : { step: 'start' };\nconst booked = new Set($('Load Booked Slots').all().map(i => i.json).filter(r => r.status === 'booked' && r.start_iso).map(r => r.start_iso));\n\nconst now = DateTime.now().setZone(CLINIC.tz);\nfunction freeSlots() {\n  // Up to 2 options per working day (first free morning + first free afternoon) for the next N working days\n  const out = [];\n  let day = now.startOf('day');\n  let added = 0;\n  while (added < CLINIC.days) {\n    day = day.plus({ days: 1 });\n    if (day.weekday > 5) continue;\n    added++;\n    const free = CLINIC.hours.map(h => day.set({ hour: h })).filter(t => !booked.has(t.toUTC().toISO()));\n    const am = free.find(t => t.hour < 12), pm = free.find(t => t.hour >= 13);\n    for (const t of [am, pm]) if (t) out.push({ iso: t.toUTC().toISO(), label: t.toFormat('ccc d LLL, h:mm a') });\n  }\n  return out;\n}\nconst menu = () => 'What would you like to book?\\n' + SERVICES.map((x, i) => `${i + 1}. ${x.label} (${x.minutes} min)`).join('\\n') + '\\n\\nReply with a number.';\nconst offerSlots = () => {\n  s.offered = freeSlots();\n  if (!s.offered.length) { s.step = 'service'; return 'Sorry, we are fully booked for the next few days. Please call the clinic and we will fit you in.'; }\n  s.step = 'slot';\n  return `Next available times (${CLINIC.tzLabel}):\\n` + s.offered.map((o, i) => `${i + 1}. ${o.label}`).join('\\n') + '\\n\\nReply with the number that suits you.';\n};\n\nlet reply = '';\nlet booking = null;\nif (['restart', 'start over', 'menu'].includes(lower)) s = { step: 'start' };\n\nswitch (s.step) {\n  case 'start':\n    s.step = 'service';\n    reply = `Hi! I'm the booking assistant for ${CLINIC.name}. ` + menu();\n    break;\n  case 'service': {\n    const n = parseInt(lower, 10);\n    const svc = SERVICES[n - 1] || SERVICES.find(x => x.words.some(w => lower.includes(w)));\n    if (!svc) { reply = 'Sorry, I didn\\'t catch that. ' + menu(); break; }\n    s.service = svc.label;\n    reply = `Great, ${svc.label}. ` + offerSlots();\n    break;\n  }\n  case 'slot': {\n    const n = parseInt(lower, 10);\n    const pick = s.offered && s.offered[n - 1];\n    if (!pick) { reply = `Please reply with a number from 1 to ${(s.offered || []).length}.`; break; }\n    if (booked.has(pick.iso)) { reply = 'That time was just taken. ' + offerSlots(); break; }\n    s.slot = pick;\n    s.step = 'name';\n    reply = `${pick.label} it is. What's your full name?`;\n    break;\n  }\n  case 'name':\n    if (text.length < 2) { reply = 'Could you type your full name?'; break; }\n    s.name = text.toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase()).replace(/\\s+/g, ' ');\n    s.step = 'phone';\n    reply = `Thanks, ${s.name.split(' ')[0]}! What's the best phone number to reach you? Your reminder goes there.`;\n    break;\n  case 'phone': {\n    const d = text.replace(/\\D/g, '');\n    if (d.length < 9) { reply = 'That doesn\\'t look like a full phone number. Please try again.'; break; }\n    s.phone = '+' + (d.length === 10 ? '1' + d : d);\n    s.step = 'confirm';\n    reply = `Please confirm:\\n- ${s.service}\\n- ${s.slot.label} (${CLINIC.tzLabel})\\n- ${s.name}, ${s.phone}\\n\\nReply YES to book, or NO to start over.`;\n    break;\n  }\n  case 'confirm':\n    if (/^(y|yes|confirm|ok|sure)\\b/.test(lower)) {\n      if (booked.has(s.slot.iso)) { reply = 'Sorry, someone booked that time a moment ago. ' + offerSlots(); break; }\n      booking = { sessionId, patient_name: s.name, phone: s.phone, service: s.service, start_iso: s.slot.iso, start_label: s.slot.label, status: 'booked', reminded: false };\n      s.step = 'done';\n      s.booked = s.slot.label;\n      reply = `You're booked! ${s.service} on ${s.slot.label} (${CLINIC.tzLabel}) at ${CLINIC.name}. We'll send a reminder 24 hours before. Reply \"new\" to book another visit.`;\n    } else if (/^(n|no)\\b/.test(lower)) {\n      s = { step: 'service' };\n      reply = 'No problem, let\\'s start over. ' + menu();\n    } else {\n      reply = 'Please reply YES to book, or NO to start over.';\n    }\n    break;\n  case 'done':\n    if (lower === 'new') { s = { step: 'service' }; reply = menu(); break; }\n    reply = `Your ${s.service} appointment is on ${s.booked}. Reply \"new\" to book another visit. To cancel or reschedule, please call the clinic.`;\n    break;\n  default:\n    s = { step: 'service' };\n    reply = menu();\n}\n\nreturn [{ json: { sessionId, state: JSON.stringify(s), output: reply, booking_created: !!booking, ...(booking || {}) } }];\n"
+      },
+      "id": "ee14fef7-6dc8-4332-88d5-663b6d7d2816",
+      "name": "Booking Assistant",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ],
+      "notes": "State machine: service -> time -> name -> phone -> confirm. No AI key needed; swap in Claude for free-text understanding later.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "KO4C4P5jAvwUxDhb",
+          "mode": "list",
+          "cachedResultName": "booking_sessions",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/KO4C4P5jAvwUxDhb"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "sessionId",
+              "condition": "eq",
+              "keyValue": "={{ $json.sessionId }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sessionId": "={{ $json.sessionId }}",
+            "state": "={{ $json.state }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "state",
+              "displayName": "state",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ff71b068-b450-4182-aaaa-0fa33ce6ff7a",
+      "name": "Save Session",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2d62b953-a726-4b19-aa81-ee8c8d419b6d",
+              "leftValue": "={{ $('Booking Assistant').item.json.booking_created }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "867469e4-03f3-488e-9580-c3adc8d7127c",
+      "name": "New Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "33dOMJYtL27KUK5O",
+          "mode": "list",
+          "cachedResultName": "appointments",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/33dOMJYtL27KUK5O"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "sessionId": "={{ $('Booking Assistant').item.json.sessionId }}",
+            "patient_name": "={{ $('Booking Assistant').item.json.patient_name }}",
+            "phone": "={{ $('Booking Assistant').item.json.phone }}",
+            "service": "={{ $('Booking Assistant').item.json.service }}",
+            "start_iso": "={{ $('Booking Assistant').item.json.start_iso }}",
+            "start_label": "={{ $('Booking Assistant').item.json.start_label }}",
+            "status": "={{ $('Booking Assistant').item.json.status }}",
+            "reminded": "={{ $('Booking Assistant').item.json.reminded }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "sessionId",
+              "displayName": "sessionId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "patient_name",
+              "displayName": "patient_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "service",
+              "displayName": "service",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "start_iso",
+              "displayName": "start_iso",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "start_label",
+              "displayName": "start_label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "reminded",
+              "displayName": "reminded",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "6fb8a919-5d39-4648-b14f-d2de71a0d5b5",
+      "name": "Save Appointment",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (\"NEW BOOKING\\n\" + String(($('Booking Assistant').item.json.patient_name) ?? '') + \" (\" + String(($('Booking Assistant').item.json.phone) ?? '') + \")\\n\" + String(($('Booking Assistant').item.json.service) ?? '') + \"\\n\" + String(($('Booking Assistant').item.json.start_label) ?? '') + \" (Central Time)\").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "ea045cb4-f63b-418d-a553-9d24fe463f99",
+      "name": "Notify Clinic (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Optional: add Google Calendar 'Create event' here once the Google credential is connected.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "53e595c0-c1cb-4b14-a4b4-17c65714011a",
+              "name": "output",
+              "value": "={{ $('Booking Assistant').first().json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d8c88954-36fe-4c86-81c3-8a338b66d80f",
+      "name": "Reply (booked)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1760,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c064bb74-58c5-4ee6-9826-77f0ed4e93b0",
+              "name": "output",
+              "value": "={{ $('Booking Assistant').first().json.output }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1d0cbf15-a1fd-42c4-8976-655d16ed23cc",
+      "name": "Reply",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1320,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Session": {
+      "main": [
+        [
+          {
+            "node": "Load Booked Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Booked Slots": {
+      "main": [
+        [
+          {
+            "node": "Booking Assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Booking Assistant": {
+      "main": [
+        [
+          {
+            "node": "Save Session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Session": {
+      "main": [
+        [
+          {
+            "node": "New Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Booking?": {
+      "main": [
+        [
+          {
+            "node": "Save Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Appointment": {
+      "main": [
+        [
+          {
+            "node": "Notify Clinic (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Clinic (Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Reply (booked)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Chicago"
+  },
+  "pinData": {}
+}

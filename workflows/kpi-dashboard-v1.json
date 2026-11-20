@@ -1,0 +1,263 @@
+{
+  "name": "portfolio-kpi-dashboard-v1",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "kpi-dashboard",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b5c09adb-c87c-49ad-bfe1-f792c23d6fe8",
+      "name": "Open Dashboard",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        100
+      ],
+      "notes": "GET /webhook/kpi-dashboard. In production add Basic Auth or Header Auth here.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "monitored_sites"
+        },
+        "returnAll": true
+      },
+      "id": "0ee4a1a0-65dc-4a83-a778-47ed2f1bf628",
+      "name": "Load Sites",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "notes": "Select your 'monitored_sites' table",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "appointments"
+        },
+        "returnAll": true
+      },
+      "id": "8f082a9a-b5dd-479e-9a25-754252697e90",
+      "name": "Load Appointments",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "notes": "Select your 'appointments' table",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "quotes"
+        },
+        "returnAll": true
+      },
+      "id": "2df87e11-2a4c-4fb5-a73d-7d076204c9a8",
+      "name": "Load Quotes",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "notes": "Select your 'quotes' table",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "error_log"
+        },
+        "returnAll": true
+      },
+      "id": "8cd58ec6-0c2b-42f7-adfb-de4b6612419a",
+      "name": "Load Errors",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        880,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "notes": "Select your 'error_log' table",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "competitor_prices"
+        },
+        "returnAll": true
+      },
+      "id": "ba29d753-0a0f-44b0-9d67-d2e4a3ccfa8e",
+      "name": "Load Prices",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "notes": "Select your 'competitor_prices' table",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the operations dashboard (HTML) from n8n Data Tables.\nconst rows = n => { try { return $(n).all().map(i => i.json).filter(r => r && r.id !== undefined); } catch (e) { return []; } };\nconst sites = rows('Load Sites'), appts = rows('Load Appointments'), quotes = rows('Load Quotes'), errors = rows('Load Errors'), prices = rows('Load Prices');\nconst TZ = 'Asia/Ho_Chi_Minh';\nconst now = DateTime.now().setZone(TZ);\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst usd = n => '$' + Number(n || 0).toLocaleString('en-US');\nconst days = n => (n === null || n === undefined || n === '') ? '<span class=\"muted\">-</span>' : `<span class=\"pill ${n < 0 || n <= 7 ? 'bad' : n <= 30 ? 'warn' : 'ok'}\">${n < 0 ? 'expired' : n + 'd'}</span>`;\n\n// KPIs\nconst up = sites.filter(s => s.status === 'up').length;\nconst upcoming = appts.filter(a => a.status === 'booked' && a.start_iso && DateTime.fromISO(a.start_iso) > now && DateTime.fromISO(a.start_iso) < now.plus({ days: 7 }))\n  .sort((a, b) => a.start_iso.localeCompare(b.start_iso));\nconst monthStart = now.startOf('month').toFormat('yyyy-LL-dd');\nconst qMonth = quotes.filter(q => String(q.created_at || '') >= monthStart);\nconst qValue = qMonth.reduce((s, q) => s + Number(q.one_time || 0), 0);\nconst mrr = quotes.reduce((s, q) => s + Number(q.monthly || 0), 0);\nconst err7 = errors.filter(e => e.createdAt && DateTime.fromISO(e.createdAt) > now.minus({ days: 7 }));\nconst attention = sites.filter(s => s.status === 'down' || [s.ssl_days_left, s.domain_days_left, s.hosting_days_left].some(d => d !== null && d !== undefined && d !== '' && d <= 30));\n\n// Chart data: quote value per day (last 14 days), bookings per service\nconst qDays = [...Array(14)].map((_, i) => now.minus({ days: 13 - i }).toFormat('yyyy-LL-dd'));\nconst qSeries = qDays.map(d => quotes.filter(q => String(q.created_at || '').startsWith(d)).reduce((s, q) => s + Number(q.one_time || 0), 0));\nconst svc = {};\nfor (const a of appts.filter(a => a.status === 'booked')) svc[a.service || 'Other'] = (svc[a.service || 'Other'] || 0) + 1;\n\nconst tile = (label, value, sub, tone) => `<div class=\"tile ${tone || ''}\"><div class=\"tl\">${label}</div><div class=\"tv\">${value}</div><div class=\"ts\">${sub}</div></div>`;\nconst siteRows = sites.map(s => `<tr><td><span class=\"dot ${s.status === 'up' ? 'ok' : s.status === 'down' ? 'bad' : 'muted'}\"></span>${esc(s.name)}<div class=\"sub\">${esc(s.client || '')}</div></td><td>${s.status === 'down' ? `<span class=\"pill bad\">down</span><div class=\"sub\">${esc(s.last_error || '')}</div>` : s.status === 'up' ? `<span class=\"pill ok\">up</span>` : '<span class=\"muted\">-</span>'}</td><td class=\"num\">${s.response_ms ? s.response_ms + ' ms' : '-'}</td><td class=\"num\">${days(s.ssl_days_left)}</td><td class=\"num\">${days(s.domain_days_left)}</td><td class=\"num\">${days(s.hosting_days_left)}</td></tr>`).join('');\nconst apptRows = upcoming.slice(0, 8).map(a => `<tr><td class=\"nw\">${esc(a.start_label)}</td><td>${esc(a.patient_name)}</td><td>${esc(a.service)}</td><td class=\"num\">${a.reminded ? '<span class=\"pill ok\">reminded</span>' : '<span class=\"pill muted\">pending</span>'}</td></tr>`).join('') || '<tr><td colspan=\"4\" class=\"muted\">No bookings in the next 7 days</td></tr>';\nconst quoteRows = [...quotes].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))).slice(0, 6).map(q => `<tr><td class=\"nw\">${esc(q.quote_no)}<div class=\"sub\">${esc(q.created_at)}</div></td><td>${esc(q.name)}<div class=\"sub\">${esc(q.company || '')}</div></td><td>${esc(q.package)}</td><td class=\"num\">${usd(q.one_time)}${q.monthly ? `<div class=\"sub\">+${usd(q.monthly)}/mo</div>` : ''}</td></tr>`).join('') || '<tr><td colspan=\"4\" class=\"muted\">No quotes yet</td></tr>';\nconst errRows = [...errors].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 5).map(e => `<li><b>${esc(e.workflow)}</b> &middot; ${esc(e.node)}<div class=\"sub\">${esc(e.message)} &middot; ${esc(e.happened_at)}</div></li>`).join('') || '<li class=\"muted\">No errors recorded</li>';\n\nconst html = `<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"refresh\" content=\"60\">\n<title>Operations Dashboard - 03 Flow Forge</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Montserrat:wght@700&family=Inter:wght@400;500;600&display=swap\" rel=\"stylesheet\">\n<script src=\"https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js\"></script>\n<style>\n:root{--navy:#2A364B;--coral:#F06E52;--coral-l:#FE8D71;--blue:#7FAFE3;--blue-l:#9CC3ED;--bg:#F5F7FB;--card:#fff;--grey:#5F6A7D;--line:#E3E8F0;--ok:#1E8E5A;--warn:#B7791F;--bad:#C2410C}\n*{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:Inter,system-ui,sans-serif;color:var(--navy);font-size:14px}\nheader{background:var(--navy);color:#fff;padding:18px 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}\n.brand{font-family:Montserrat,sans-serif;font-size:20px}.brand b{color:var(--coral-l)}.upd{color:#C9D3E3;font-size:12px}\nmain{max-width:1200px;margin:0 auto;padding:20px 16px 40px}\n.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}\n.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}.tile.alert{border-color:var(--coral);box-shadow:inset 3px 0 0 var(--coral)}\n.tl{color:var(--grey);font-size:12px;text-transform:uppercase;letter-spacing:.04em}.tv{font-size:26px;font-weight:600;margin:4px 0;font-variant-numeric:tabular-nums}.ts{color:var(--grey);font-size:12px}\n.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}@media(max-width:860px){.grid{grid-template-columns:1fr}}.nw{white-space:nowrap}\n.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}.card.wide{grid-column:1/-1}\nh2{font-size:15px;margin:0 0 12px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--grey);font-weight:500;font-size:12px}\n.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.sub{color:var(--grey);font-size:12px;margin-top:2px}.muted{color:var(--grey)}\n.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:500}.pill.ok{background:#E3F4EC;color:var(--ok)}.pill.warn{background:#FDF1DC;color:var(--warn)}.pill.bad{background:#FDE7DF;color:var(--bad)}.pill.muted{background:#EEF1F6;color:var(--grey)}\n.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;background:#C9D3E3}.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}\nul{list-style:none;margin:0;padding:0}li{padding:8px 0;border-bottom:1px solid var(--line)}.scroll{overflow-x:auto}\n.chart{position:relative;height:220px}\n</style></head><body>\n<header><div><div class=\"brand\"><b>03</b> FLOW FORGE</div><div class=\"upd\">Operations dashboard &middot; built with n8n</div></div><div class=\"upd\">Updated ${now.toFormat('dd LLL yyyy, HH:mm')} (GMT+7) &middot; refreshes every 60s</div></header>\n<main>\n<div class=\"tiles\">\n${tile('Websites up', up + ' / ' + sites.length, attention.length ? attention.length + ' need attention' : 'all healthy', attention.length ? 'alert' : '')}\n${tile('Bookings next 7 days', upcoming.length, appts.filter(a => a.status === 'booked').length + ' booked in total')}\n${tile('Quotes this month', qMonth.length, usd(qValue) + ' quoted')}\n${tile('Recurring quoted', usd(mrr) + '/mo', 'maintenance add-ons')}\n${tile('Workflow errors (7 days)', err7.length, errors.length + ' logged in total', err7.length ? 'alert' : '')}\n${tile('Competitor products tracked', prices.length, prices.length ? 'last check ' + esc(prices[0].last_checked || '-') : 'no data yet')}\n</div>\n<div class=\"grid\">\n<div class=\"card wide\"><h2>Websites &middot; status and days until expiry</h2><div class=\"scroll\"><table><tr><th>Site</th><th>Status</th><th class=\"num\">Response</th><th class=\"num\">SSL</th><th class=\"num\">Domain</th><th class=\"num\">Hosting</th></tr>${siteRows}</table></div></div>\n<div class=\"card\"><h2>Quoted value per day (last 14 days)</h2><div class=\"chart\"><canvas id=\"q\"></canvas></div></div>\n<div class=\"card\"><h2>Bookings by service</h2><div class=\"chart\"><canvas id=\"s\"></canvas></div></div>\n<div class=\"card\"><h2>Upcoming appointments</h2><div class=\"scroll\"><table><tr><th>When (CT)</th><th>Patient</th><th>Service</th><th class=\"num\">Reminder</th></tr>${apptRows}</table></div></div>\n<div class=\"card\"><h2>Latest quotes</h2><div class=\"scroll\"><table><tr><th>Quote</th><th>Client</th><th>Package</th><th class=\"num\">Value</th></tr>${quoteRows}</table></div></div>\n<div class=\"card wide\"><h2>Recent workflow errors</h2><ul>${errRows}</ul></div>\n</div></main>\n<script>\nconst D=${JSON.stringify({ qDays: qDays.map(d => d.slice(5)), qSeries, svcL: Object.keys(svc), svcV: Object.values(svc) })};\nif (window.Chart) {\n  Chart.defaults.font.family='Inter, system-ui, sans-serif'; Chart.defaults.color='#5F6A7D';\n  new Chart(document.getElementById('q'),{type:'bar',data:{labels:D.qDays,datasets:[{data:D.qSeries,backgroundColor:'#F06E52',borderRadius:4,maxBarThickness:28}]},options:{maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+c.parsed.y.toLocaleString('en-US')}}},scales:{y:{beginAtZero:true,grid:{color:'#E3E8F0'},ticks:{callback:v=>'$'+v}},x:{grid:{display:false}}}}});\n  new Chart(document.getElementById('s'),{type:'bar',data:{labels:D.svcL,datasets:[{data:D.svcV,backgroundColor:'#7FAFE3',borderRadius:4,maxBarThickness:28}]},options:{indexAxis:'y',maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,ticks:{precision:0},grid:{color:'#E3E8F0'}},y:{grid:{display:false}}}}});\n}\n</script></body></html>`;\nreturn [{ json: { html } }];\n"
+      },
+      "id": "d7a24911-6557-4b77-af88-4d6c7343fcf0",
+      "name": "Build Dashboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d895a47d-b600-4fff-9b1f-b8cc82a2410a",
+      "name": "Show Page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Open Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Load Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Sites": {
+      "main": [
+        [
+          {
+            "node": "Load Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Appointments": {
+      "main": [
+        [
+          {
+            "node": "Load Quotes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Quotes": {
+      "main": [
+        [
+          {
+            "node": "Load Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Errors": {
+      "main": [
+        [
+          {
+            "node": "Load Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Prices": {
+      "main": [
+        [
+          {
+            "node": "Build Dashboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Dashboard": {
+      "main": [
+        [
+          {
+            "node": "Show Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,385 @@
+{
+  "name": "portfolio-rag-3dprint-chat-v1",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "mode": "hostedChat",
+        "authentication": "none",
+        "initialMessages": "Hi! I'm the LayerLab 3D assistant.\nAsk me about materials, design rules, pricing or delivery.\nTip: start a message with /claude, /deepseek or /gemini to switch AI model.",
+        "options": {
+          "title": "LayerLab 3D - Printing Assistant",
+          "subtitle": "RAG chatbot demo by 03 Flow Forge",
+          "inputPlaceholder": "e.g. Which material for an outdoor bracket?",
+          "responseMode": "lastNode"
+        }
+      },
+      "id": "68dd22f6-6c46-43de-bb56-a11201e6b41c",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Choose the AI provider for this message.\n// Default below; a customer (or you, in a demo) can switch per message with /claude, /deepseek or /gemini.\nconst DEFAULT_PROVIDER = 'deepseek';\nconst NAMES = { claude: 'Claude (Anthropic)', deepseek: 'DeepSeek', gemini: 'Gemini (Google)' };\nconst j = $input.first().json;\nlet text = String(j.chatInput || '').trim();\nlet provider = DEFAULT_PROVIDER;\nconst m = text.match(/^\\/(claude|deepseek|gemini)\\b\\s*/i);\nif (m) { provider = m[1].toLowerCase(); text = text.slice(m[0].length) || 'Hello'; }\nreturn [{ json: { sessionId: j.sessionId, chatInput: text, provider, provider_name: NAMES[provider] } }];"
+      },
+      "id": "9f0544d8-48a5-4dfa-a220-e362e9b5e4f2",
+      "name": "Pick AI Provider",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are the virtual assistant of LayerLab 3D, an online 3D printing service.\nRules:\n1. Before answering any question about materials, design rules, specifications, file formats, pricing, delivery, finishing or policies, search the knowledge base tool. Use only facts found there.\n2. If the knowledge base does not contain the answer, say you do not know and offer to connect the customer with a human at support@layerlab3d.example. Never invent prices, dates, sizes or material properties.\n3. For price estimates, apply the pricing rules from the knowledge base step by step and show the calculation. Say the final price is confirmed after the file is uploaded.\n4. End every factual answer with a line \"Sources:\" listing the document and section names you used, for example (Materials > PETG).\n5. Reply in the customer's language (Vietnamese or English). Keep answers under about 120 words unless the customer asks for more detail.\n6. Politely refuse requests to print weapons or firearm parts.",
+          "maxIterations": 6
+        }
+      },
+      "id": "eae27237-d82c-4663-b713-51d3e7c5743a",
+      "name": "3D Printing Assistant",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Show which AI model answered (useful when comparing providers).\nconst out = $input.first().json.output || '';\nreturn [{ json: { output: out + '\\n\\n_Answered by ' + $('Pick AI Provider').first().json.provider_name + '_' } }];"
+      },
+      "id": "da35f55f-3575-459a-8ebf-cb60a509ebed",
+      "name": "Add Model Tag",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "numberInputs": 3,
+        "rules": {
+          "rule": [
+            {
+              "modelIndex": 1,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6672a073-605d-4874-ac5b-564d7226d06e",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "claude",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "modelIndex": 2,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "26525bf3-2678-4493-abc7-9f960ddc18a8",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "deepseek",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "modelIndex": 3,
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "05cd21a8-7a94-4897-9297-60a850b33d37",
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "gemini",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        }
+      },
+      "id": "f8ab22e4-f8b7-4f6d-8eab-a666dbc85370",
+      "name": "Model Selector",
+      "type": "@n8n/n8n-nodes-langchain.modelSelector",
+      "typeVersion": 1,
+      "position": [
+        300,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5-5"
+        },
+        "options": {
+          "maxTokensToSample": 800,
+          "temperature": 0.2
+        }
+      },
+      "id": "7c827f3f-899b-4715-b7dc-d195a14c73b8",
+      "name": "Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        80,
+        560
+      ],
+      "notes": "Anthropic API credential",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "model": "deepseek-chat",
+        "options": {
+          "maxTokens": 800,
+          "temperature": 0.2
+        }
+      },
+      "id": "1214b47e-bfc2-4d98-9ca6-a1627e9ac8df",
+      "name": "DeepSeek",
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        260,
+        560
+      ],
+      "notes": "DeepSeek API credential",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash",
+        "options": {
+          "maxOutputTokens": 2048,
+          "temperature": 0.2
+        }
+      },
+      "id": "3fd23f41-5f75-4270-8b04-ff592ad3681f",
+      "name": "Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        560
+      ],
+      "notes": "Google Gemini credential (free tier)",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "sessionIdType": "fromInput",
+        "contextWindowLength": 6
+      },
+      "id": "35017451-3b97-4d79-a040-4737436e43d4",
+      "name": "Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        560,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "Search the LayerLab 3D knowledge base: services, materials, design guidelines, tolerances, build volume, file formats, pricing, delivery, finishing, policies and FAQ. Use it for every factual question.",
+        "memoryKey": {
+          "__rl": true,
+          "mode": "list",
+          "value": "kb_3d_printing",
+          "cachedResultName": "kb_3d_printing"
+        },
+        "topK": 4,
+        "includeDocumentMetadata": true
+      },
+      "id": "989841ba-1870-4790-b32f-b71358e469bd",
+      "name": "Knowledge Base Search",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreInMemory",
+      "typeVersion": 1.3,
+      "position": [
+        720,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001"
+      },
+      "id": "52ff3033-909d-47ac-a091-f7c457df7c92",
+      "name": "Gemini Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        760,
+        560
+      ],
+      "notes": "Needs a Google Gemini (PaLM) API credential - free tier works.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pick AI Provider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick AI Provider": {
+      "main": [
+        [
+          {
+            "node": "3D Printing Assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3D Printing Assistant": {
+      "main": [
+        [
+          {
+            "node": "Add Model Tag",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Model Selector",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Model Selector",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Model Selector",
+            "type": "ai_languageModel",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Model Selector": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "3D Printing Assistant",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "3D Printing Assistant",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Knowledge Base Search": {
+      "ai_tool": [
+        [
+          {
+            "node": "3D Printing Assistant",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Knowledge Base Search",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,296 @@
+{
+  "name": "portfolio-site-monitor-uptime-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b8f8079f-adc1-4f64-a117-181724d12e1c",
+      "name": "Run Check",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "3057ea1e-2b02-4d44-a06d-2bfe379d80d4",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "k1KL4SSsorl7McsM",
+          "mode": "list",
+          "cachedResultName": "monitored_sites",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/k1KL4SSsorl7McsM"
+        },
+        "returnAll": true
+      },
+      "id": "c04d43c6-ac77-4072-b8f1-e2e841d2edc4",
+      "name": "Load Sites",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        100
+      ],
+      "notes": "Add or remove websites in the monitored_sites table, no code changes needed.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check every active site: HTTP status, response time, optional keyword.\n// A site is only reported DOWN after CONFIRM_FAILS failed checks in a row (avoids false alarms).\nconst CONFIRM_FAILS = $execution.mode === 'production' ? 2 : 1;\nconst TIMEOUT_MS = 15000;\nconst now = DateTime.now().setZone('Asia/Ho_Chi_Minh');\nconst sites = $input.all().map(i => i.json).filter(s => s.url && s.active !== false);\nconst out = [];\nfor (const s of sites) {\n  const t0 = Date.now();\n  let code = null, ok = false, error = null;\n  try {\n    const r = await this.helpers.httpRequest({ url: s.url, method: 'GET', returnFullResponse: true, ignoreHttpStatusErrors: true, timeout: TIMEOUT_MS, headers: { 'User-Agent': '03FlowForge-Monitor/1.0' } });\n    code = r.statusCode;\n    ok = code >= 200 && code < 400;\n    if (ok && s.keyword) {\n      const body = Buffer.isBuffer(r.body) ? r.body.toString('utf8') : (typeof r.body === 'string' ? r.body : JSON.stringify(r.body));\n      if (!body.includes(s.keyword)) { ok = false; error = 'Keyword \"' + s.keyword + '\" not found on page'; }\n    }\n    if (!ok && !error) error = 'HTTP ' + code;\n  } catch (e) {\n    error = String(e.message || e).slice(0, 200);\n  }\n  const ms = Date.now() - t0;\n  const prev = s.status || 'unknown';\n  const fails = ok ? 0 : (s.fail_count || 0) + 1;\n  let status = prev;\n  let alert = null;\n  if (ok) {\n    if (prev === 'down') {\n      const mins = s.down_since ? Math.max(1, Math.round(now.diff(DateTime.fromISO(s.down_since), 'minutes').minutes)) : null;\n      alert = 'RECOVERED: ' + s.name + ' (' + s.url + ') is back up' + (mins ? ' after ' + mins + ' min' : '') + ', ' + ms + ' ms';\n    }\n    status = 'up';\n  } else if (fails >= CONFIRM_FAILS) {\n    if (prev !== 'down') alert = 'DOWN: ' + s.name + ' (' + s.url + ')\\nReason: ' + error + (s.client ? '\\nClient: ' + s.client : '');\n    status = 'down';\n  }\n  out.push({ json: {\n    id: s.id, name: s.name, url: s.url, client: s.client,\n    status, fail_count: fails, last_status_code: code, response_ms: ms, last_error: ok ? '' : error,\n    last_checked: now.toISO(),\n    down_since: status === 'down' ? (prev === 'down' && s.down_since ? s.down_since : now.toISO()) : '',\n    alert,\n  } });\n}\nreturn out;"
+      },
+      "id": "52587fb4-cf01-4234-ac0d-8b060d5e7b50",
+      "name": "Check Sites",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "k1KL4SSsorl7McsM",
+          "mode": "list",
+          "cachedResultName": "monitored_sites",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/k1KL4SSsorl7McsM"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.status }}",
+            "fail_count": "={{ $json.fail_count }}",
+            "last_status_code": "={{ $json.last_status_code }}",
+            "response_ms": "={{ $json.response_ms }}",
+            "last_error": "={{ $json.last_error }}",
+            "last_checked": "={{ $json.last_checked }}",
+            "down_since": "={{ $json.down_since }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "fail_count",
+              "displayName": "fail_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_status_code",
+              "displayName": "last_status_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "response_ms",
+              "displayName": "response_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_error",
+              "displayName": "last_error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_checked",
+              "displayName": "last_checked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "down_since",
+              "displayName": "down_since",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "141f50d5-05c0-4d17-aedd-bc3dad678a17",
+      "name": "Save Status",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One message with every state change in this run (nothing changed = no message).\nconst alerts = $('Check Sites').all().map(i => i.json.alert).filter(Boolean);\nif (!alerts.length) return [];\nreturn [{ json: { text: 'SITE MONITOR\\n' + alerts.join('\\n\\n') } }];"
+      },
+      "id": "7f777855-4f82-47f2-acfe-cac36a6cd976",
+      "name": "Build Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (String(($json.text) ?? '')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "a294f8d5-aff8-4965-b5b9-dd41c69cd6f9",
+      "name": "Alert (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3
+    }
+  ],
+  "connections": {
+    "Run Check": {
+      "main": [
+        [
+          {
+            "node": "Load Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Load Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Sites": {
+      "main": [
+        [
+          {
+            "node": "Check Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Sites": {
+      "main": [
+        [
+          {
+            "node": "Save Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Status": {
+      "main": [
+        [
+          {
+            "node": "Build Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert": {
+      "main": [
+        [
+          {
+            "node": "Alert (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

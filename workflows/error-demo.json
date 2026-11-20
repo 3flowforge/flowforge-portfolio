@@ -1,0 +1,50 @@
+{
+  "name": "portfolio-error-demo",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "simulate-failure",
+        "options": {}
+      },
+      "id": "a35f2570-e06c-4dae-b676-73d002ab878c",
+      "name": "Trigger Demo",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "8e55d149-5083-496d-9eea-8a851d852809"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simulates a real-world failure so the error alert can be demonstrated.\nthrow new Error('Shopify API returned 503 Service Unavailable while fetching new orders');"
+      },
+      "id": "c9e4fa40-30c1-4a1b-bedb-fca681397a81",
+      "name": "Fetch Shopify Orders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Trigger Demo": {
+      "main": [
+        [
+          {
+            "node": "Fetch Shopify Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

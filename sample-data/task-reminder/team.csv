@@ -1,0 +1,6 @@
+name,telegram_chat_id,channel,channel_target,digest,active,is_admin
+Hoa Phan,<your chat id>,telegram,,TRUE,TRUE,TRUE
+Linh Tran,<chat id>,telegram,,TRUE,TRUE,FALSE
+Minh Le,,email,minh@example.com,TRUE,TRUE,FALSE
+Sales Channel,,slack,SLACK_WEBHOOK_SALES,FALSE,TRUE,FALSE
+Ops Room,,discord,DISCORD_WEBHOOK_OPS,FALSE,TRUE,FALSE

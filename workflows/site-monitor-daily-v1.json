@@ -1,0 +1,284 @@
+{
+  "name": "portfolio-site-monitor-daily-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "c3d3d303-ca5f-47c8-a653-c180795a87b8",
+      "name": "Run Check",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "9859adda-da14-4bff-a6d1-fe3b55699772",
+      "name": "Every Day 8 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "k1KL4SSsorl7McsM",
+          "mode": "list",
+          "cachedResultName": "monitored_sites",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/k1KL4SSsorl7McsM"
+        },
+        "returnAll": true
+      },
+      "id": "40be3674-29c1-4832-b797-3485747efd79",
+      "name": "Load Sites",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daily expiry check: SSL certificate, domain registration (RDAP), hosting (entered by hand).\nconst WARN = { ssl: 21, domain: 30, hosting: 30 };\nconst today = DateTime.now().setZone('Asia/Ho_Chi_Minh').startOf('day');\nlet tls = null;\ntry { tls = require('tls'); } catch (e) { tls = null; }\nconst TWO_LEVEL = ['co.uk', 'com.vn', 'net.vn', 'org.vn', 'edu.vn', 'gov.vn', 'com.au', 'net.au', 'co.nz', 'com.sg', 'co.jp', 'com.br'];\nconst rootDomain = host => { const p = host.split('.'); const last2 = p.slice(-2).join('.'); return TWO_LEVEL.includes(last2) ? p.slice(-3).join('.') : last2; };\nconst daysUntil = d => d ? Math.floor(DateTime.fromISO(d).startOf('day').diff(today, 'days').days) : null;\nfunction sslInfo(host) {\n  return new Promise(resolve => {\n    if (!tls) return resolve({ error: 'SSL check disabled: add NODE_FUNCTION_ALLOW_BUILTIN=tls to n8n' });\n    const sock = tls.connect({ host, port: 443, servername: host, rejectUnauthorized: false, timeout: 10000 }, () => {\n      const c = sock.getPeerCertificate();\n      const res = { valid_to: c && c.valid_to ? DateTime.fromJSDate(new Date(c.valid_to)).toISODate() : null, issuer: (c && c.issuer && (c.issuer.O || c.issuer.CN)) || '', authorized: sock.authorized, authError: sock.authorizationError ? String(sock.authorizationError) : null };\n      sock.end(); resolve(res);\n    });\n    sock.on('error', e => resolve({ error: e.message }));\n    sock.on('timeout', () => { sock.destroy(); resolve({ error: 'timeout' }); });\n  });\n}\nconst out = [];\nfor (const s of $input.all().map(i => i.json).filter(x => x.url && x.active !== false)) {\n  const host = String(s.url).replace(/^https?:\\/\\//i, '').split(/[\\/?#]/)[0].split(':')[0].toLowerCase();\n  const ssl = await sslInfo(host);\n  let domainExp = null, domainNote = '';\n  try {\n    const r = await this.helpers.httpRequest({ url: 'https://rdap.org/domain/' + rootDomain(host), json: true, timeout: 15000 });\n    const ev = (r.events || []).find(e => e.eventAction === 'expiration');\n    domainExp = ev ? ev.eventDate.slice(0, 10) : null;\n    if (!ev) domainNote = 'registry does not publish expiry';\n  } catch (e) { domainNote = 'no RDAP data for this domain'; }\n  const sslDays = ssl.valid_to ? daysUntil(ssl.valid_to) : null;\n  const domDays = daysUntil(domainExp);\n  const hostDays = daysUntil(s.hosting_expires);\n  const warnings = [];\n  if (ssl.error) warnings.push('SSL check failed: ' + ssl.error);\n  else if (sslDays !== null && sslDays < 0) warnings.push('SSL EXPIRED ' + (-sslDays) + ' day(s) ago');\n  else if (ssl.authError && ssl.authError !== 'CERT_HAS_EXPIRED') warnings.push('SSL invalid: ' + ssl.authError);\n  else if (sslDays !== null && sslDays <= WARN.ssl) warnings.push('SSL expires in ' + sslDays + ' day(s)');\n  if (domDays !== null && domDays < 0) warnings.push('DOMAIN EXPIRED');\n  else if (domDays !== null && domDays <= WARN.domain) warnings.push('Domain expires in ' + domDays + ' day(s)');\n  if (hostDays !== null && hostDays < 0) warnings.push('HOSTING EXPIRED ' + (-hostDays) + ' day(s) ago (' + (s.hosting_provider || 'host') + ')');\n  else if (hostDays !== null && hostDays <= WARN.hosting) warnings.push('Hosting (' + (s.hosting_provider || 'host') + ') renews in ' + hostDays + ' day(s)');\n  out.push({ json: {\n    id: s.id, name: s.name, url: s.url, client: s.client, status: s.status, response_ms: s.response_ms,\n    ssl_expires: ssl.valid_to || '', ssl_days_left: sslDays, ssl_issuer: ssl.issuer || '',\n    domain_expires: domainExp || '', domain_days_left: domDays, domain_note: domainNote,\n    hosting_days_left: hostDays, warnings,\n  } });\n}\nreturn out;"
+      },
+      "id": "08b239c6-a57a-4a88-b683-a859b7a1946a",
+      "name": "Check Expiry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ],
+      "notes": "SSL via TLS handshake, domain via RDAP, hosting from the table. Warn thresholds at the top.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "k1KL4SSsorl7McsM",
+          "mode": "list",
+          "cachedResultName": "monitored_sites",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/k1KL4SSsorl7McsM"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "ssl_expires": "={{ $json.ssl_expires }}",
+            "ssl_days_left": "={{ $json.ssl_days_left }}",
+            "ssl_issuer": "={{ $json.ssl_issuer }}",
+            "domain_expires": "={{ $json.domain_expires }}",
+            "domain_days_left": "={{ $json.domain_days_left }}",
+            "hosting_days_left": "={{ $json.hosting_days_left }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ssl_expires",
+              "displayName": "ssl_expires",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ssl_days_left",
+              "displayName": "ssl_days_left",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "ssl_issuer",
+              "displayName": "ssl_issuer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "domain_expires",
+              "displayName": "domain_expires",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "domain_days_left",
+              "displayName": "domain_days_left",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hosting_days_left",
+              "displayName": "hosting_days_left",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "6c77c2b3-3156-4fd9-a4f8-6e34895f5ddd",
+      "name": "Save Expiry Dates",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Daily report: warnings first, then a one-line summary per site.\nconst rows = $('Check Expiry').all().map(i => i.json);\nconst d = n => n === null || n === undefined ? '-' : n + 'd';\nconst warn = rows.filter(r => r.warnings.length);\nconst lines = rows.map(r => (r.status === 'down' ? '[DOWN] ' : r.warnings.length ? '[!] ' : '[OK] ') + r.name + ' | SSL ' + d(r.ssl_days_left) + ' | domain ' + d(r.domain_days_left) + ' | hosting ' + d(r.hosting_days_left));\nconst text = 'DAILY WEBSITE REPORT - ' + DateTime.now().setZone('Asia/Ho_Chi_Minh').toFormat('dd LLL yyyy') + '\\n' + rows.length + ' sites, ' + rows.filter(r => r.status === 'up').length + ' up, ' + warn.length + ' need attention\\n'\n  + (warn.length ? '\\nACTION NEEDED\\n' + warn.map(r => '- ' + r.name + ': ' + r.warnings.join('; ')).join('\\n') + '\\n' : '')\n  + '\\nALL SITES (days left)\\n' + lines.join('\\n');\nreturn [{ json: { text } }];"
+      },
+      "id": "a243766c-6994-4eee-adf3-ebda795a06e5",
+      "name": "Build Daily Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (String(($json.text) ?? '')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "871d64b7-0f90-4585-bd00-55a8808bcdd8",
+      "name": "Send Report (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1100,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3
+    }
+  ],
+  "connections": {
+    "Run Check": {
+      "main": [
+        [
+          {
+            "node": "Load Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Day 8 AM": {
+      "main": [
+        [
+          {
+            "node": "Load Sites",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Sites": {
+      "main": [
+        [
+          {
+            "node": "Check Expiry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Expiry": {
+      "main": [
+        [
+          {
+            "node": "Save Expiry Dates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Expiry Dates": {
+      "main": [
+        [
+          {
+            "node": "Build Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Send Report (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

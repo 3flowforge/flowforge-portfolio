@@ -1,0 +1,226 @@
+{
+  "name": "portfolio-zapier-migration-lead-router-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "6bdaa535-2c2d-4974-afce-d6df1c8b962c",
+      "name": "Run Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sample form submissions (replaces Typeform/Webflow). Messy on purpose: spacing, casing, duplicate, bad email.\nconst leads = [\n  { name: '  daniel RUIZ ', email: 'Daniel@RuizDental.example ', phone: '(512) 555-0142', company: 'Ruiz Dental', budget: '$3,000 - 5,000', timeline: 'this month', message: 'Appointment reminders and review requests across 3 clinics.' },\n  { name: 'priya n', email: 'priya.n@example.com', phone: '', company: '', budget: 'not sure', timeline: 'someday', message: 'Just curious what AI can do.' },\n  { name: 'Tom Becker', email: 'tom@beckerlog.example', phone: '+1 646 555 0199', company: 'Becker Logistics', budget: '$10k+', timeline: 'ASAP', message: 'Dispatch team copies data from emails into our TMS all day.' },\n  { name: 'Emily Chen', email: 'emily@chenbakery.example', phone: '415.555.0123', company: 'Chen Bakery', budget: '<$500', timeline: 'next quarter', message: 'Want an Instagram auto-poster.' },\n  { name: 'TOM BECKER', email: ' tom@beckerlog.example', phone: '', company: 'Becker Logistics', budget: '$10k+', timeline: 'ASAP', message: 'Sent the form twice, sorry!' },\n  { name: 'Mark', email: 'mark@@broken', phone: '', company: '', budget: '$2000', timeline: 'this month', message: 'test' },\n];\nreturn leads.map(l => ({ json: { ...l, source: 'sample' } }));\n"
+      },
+      "id": "dff4eb16-678a-4cf4-afa3-7ce575dfa1b1",
+      "name": "Sample Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "notes": "6 messy test submissions: duplicate, bad email, mixed formats.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "options": {}
+      },
+      "id": "ecc42f37-c0e3-463b-8085-ce108042316b",
+      "name": "Lead Intake Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        220
+      ],
+      "webhookId": "d39ae7e4-60f0-41a7-b391-2ccb540db2bd",
+      "notes": "Production entry: point Typeform/Webflow/website form here (replaces the Zapier trigger).",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatter step: clean every field the way Zapier Formatter would (free in Zapier, free here too).\nconst title = s => (s || '').trim().toLowerCase().replace(/\\b\\w/g, c => c.toUpperCase()).replace(/\\s+/g, ' ');\nconst money = s => {\n  const t = String(s || '').toLowerCase().replace(/,/g, '');\n  const m = t.match(/(\\d+(?:\\.\\d+)?)\\s*(k)?/);\n  if (!m) return null;\n  return Number(m[1]) * (m[2] ? 1000 : 1);\n};\nconst phone = s => {\n  const d = String(s || '').replace(/\\D/g, '');\n  if (!d) return null;\n  if (d.length === 10) return '+1' + d;          // US local number\n  return '+' + d;\n};\nconst urgentWords = ['asap', 'this month', 'this week', 'next month'];\nreturn $input.all().map(({ json: raw }) => {\n  const j = raw.body ?? raw;                        // webhook payloads arrive under body\n  const timeline = String(j.timeline || '').trim().toLowerCase();\n  return { json: {\n    name: title(j.name),\n    email: String(j.email || '').trim().toLowerCase(),\n    phone: phone(j.phone),\n    company: (j.company || '').trim() || null,\n    budget_raw: j.budget || null,\n    budget_min: money(j.budget),\n    timeline,\n    is_urgent: urgentWords.includes(timeline),\n    message: (j.message || '').trim(),\n    source: raw.source || 'webhook',\n    received_at: new Date().toISOString(),\n  } };\n});\n"
+      },
+      "id": "4a0b0599-af32-4f4c-8cbf-6cc5392a5a2d",
+      "name": "Normalize (Formatter)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate emails, drop duplicates, decide who is a hot lead.\nconst seen = new Set();\nconst out = [];\nfor (const { json: l } of $input.all()) {\n  const validEmail = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(l.email);\n  if (!validEmail) continue;                 // in production: route to an \"invalid\" log instead\n  if (seen.has(l.email)) continue;           // duplicate submission\n  seen.add(l.email);\n  const qualified = (l.budget_min ?? 0) >= 1000 && l.is_urgent;\n  out.push({ json: { ...l, qualified, reason: qualified ? `Budget from $${l.budget_min}, timeline \"${l.timeline}\"` : 'Below budget or no urgency' } });\n}\nreturn out;\n"
+      },
+      "id": "0469b130-bc76-4a3f-9a77-279eef8a4fd9",
+      "name": "Validate & Dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9326746d-9ac2-4426-bdb4-885a40453b34",
+              "leftValue": "={{ $json.qualified }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "77eef452-0d0d-4205-92d3-9456f6ff7e6e",
+      "name": "Hot Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (\"HOT LEAD: \" + String(($json.name) ?? '') + String(($json.company ? ' - ' + $json.company : '') ?? '') + \"\\nBudget: \" + String(($json.budget_raw) ?? '') + \" | Timeline: \" + String(($json.timeline) ?? '') + \"\\nEmail: \" + String(($json.email) ?? '') + String(($json.phone ? ' | ' + $json.phone : '') ?? '') + \"\\n\\n\\\"\" + String(($json.message) ?? '') + \"\\\"\\n\\nReply within 5 minutes.\").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "a3922269-859c-4a4f-8eda-32ee7fbf6b45",
+      "name": "Alert Sales (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1140,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Replaces Zapier Slack/Gmail step. Swap for Slack or Gmail node if the client prefers.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Not hot yet: these go to a nurture list (Google Sheets / Mailchimp in production).\nreturn $input.all().map(({ json: l }) => ({ json: { list: 'nurture', name: l.name, email: l.email, budget_raw: l.budget_raw, timeline: l.timeline } }));\n"
+      },
+      "id": "a5dba809-8a97-4691-b654-5280f88f931a",
+      "name": "Add to Nurture List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1140,
+        220
+      ],
+      "notes": "Placeholder for Google Sheets / Mailchimp append.",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Run Test": {
+      "main": [
+        [
+          {
+            "node": "Sample Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sample Leads": {
+      "main": [
+        [
+          {
+            "node": "Normalize (Formatter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Intake Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize (Formatter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize (Formatter)": {
+      "main": [
+        [
+          {
+            "node": "Validate & Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Dedupe": {
+      "main": [
+        [
+          {
+            "node": "Hot Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hot Lead?": {
+      "main": [
+        [
+          {
+            "node": "Alert Sales (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add to Nurture List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,171 @@
+{
+  "name": "portfolio-error-alerts-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "7fa52355-6f0a-4202-9ef7-f4a8ee421ec6",
+      "name": "On Any Workflow Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        100
+      ],
+      "notes": "Set this workflow as the Error Workflow in each workflow's settings.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn n8n's error payload into a short, readable alert.\nconst e = $input.first().json;\nconst wf = e.workflow?.name || 'Unknown workflow';\nconst node = e.execution?.lastNodeExecuted || e.trigger?.error?.node?.name || 'unknown node';\nconst msg = String(e.execution?.error?.message || e.trigger?.error?.message || 'No error message').slice(0, 300);\nconst url = e.execution?.url || '';\nconst at = DateTime.now().setZone('Asia/Ho_Chi_Minh').toFormat('dd LLL yyyy, HH:mm');\nreturn [{ json: {\n  workflow: wf, node, message: msg, execution_url: url, happened_at: at,\n  alert: `WORKFLOW FAILED\\n${wf}\\nStep: ${node}\\nError: ${msg}\\nTime: ${at}${url ? '\\nOpen: ' + url : ''}`,\n} }];"
+      },
+      "id": "c56787cf-dd90-4ed8-9f6e-8f92241e77c4",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (String(($json.alert) ?? '')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "a194a0f9-9139-40ed-b623-4426c6bb5a23",
+      "name": "Alert Team (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "webhookId": "4d921047-3fb6-4b3d-bb00-44e2581c39b8"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "NJLHPI6HiG6iqIh4",
+          "mode": "list",
+          "cachedResultName": "error_log",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/NJLHPI6HiG6iqIh4"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "workflow": "={{ $('Format Alert').item.json.workflow }}",
+            "node": "={{ $('Format Alert').item.json.node }}",
+            "message": "={{ $('Format Alert').item.json.message }}",
+            "execution_url": "={{ $('Format Alert').item.json.execution_url }}",
+            "happened_at": "={{ $('Format Alert').item.json.happened_at }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "workflow",
+              "displayName": "workflow",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "node",
+              "displayName": "node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "execution_url",
+              "displayName": "execution_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "happened_at",
+              "displayName": "happened_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8a147580-f876-4dfd-94aa-612fb298962b",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "On Any Workflow Error": {
+      "main": [
+        [
+          {
+            "node": "Format Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert": {
+      "main": [
+        [
+          {
+            "node": "Alert Team (Telegram)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

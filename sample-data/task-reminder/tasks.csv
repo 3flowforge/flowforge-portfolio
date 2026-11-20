@@ -1,0 +1,7 @@
+id,task,assignee,due_at,remind_before_min,repeat,priority,status,notes,next_remind_at,remind_count,last_sent_at,created_by,created_at,source
+,Send the Brightline invoice,Hoa Phan,2026-11-21 15:00,30,none,high,,,,,,,,
+,Weekly client report,Hoa Phan,2026-11-27 17:00,60,weekly,normal,,,,,,,,
+,Team standup,Linh Tran,2026-11-23 09:30,10,weekdays,normal,,,,,,,,
+,Renew the domain demo-shop.example,Minh Le,2026-11-25 10:00,1440,none,high,,Expires 30 Nov,,,,,,
+,Pay the office internet bill,Minh Le,2026-12-05 09:00,0,monthly,normal,,,,,,,,
+,Post the Black Friday promo,Sales Channel,2026-11-27 08:00,0,none,high,,,,,,,,

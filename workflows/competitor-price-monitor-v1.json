@@ -1,0 +1,334 @@
+{
+  "name": "portfolio-competitor-price-monitor-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8e5f33aa-6e51-46cc-9b71-ea585fa509fe",
+      "name": "Run Check",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "19ee2bc1-424c-4b98-b4c1-9e004163cacc",
+      "name": "Every Day 7 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://books.toscrape.com/catalogue/category/books/travel_2/index.html",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "b4d89738-3357-4230-a0d0-1e83b66415e4",
+      "name": "Fetch Competitor Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Demo target: books.toscrape.com (a site built for scraping practice). Swap for the client's competitor URLs.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull product name, price and stock from the category page.\nconst BASE = 'https://books.toscrape.com/catalogue/';\nconst decode = s => s.replace(/&#39;/g, \"'\").replace(/&quot;/g, '\"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');\nconst html = String($input.first().json.data || '');\nconst cards = html.split('<article class=\"product_pod\">').slice(1);\nconst out = [];\nfor (const c of cards) {\n  const a = c.match(/<h3><a href=\"([^\"]+)\" title=\"([^\"]+)\"/);\n  const p = c.match(/class=\"price_color\">[^0-9]*([0-9.]+)</);\n  if (!a || !p) continue;\n  out.push({ json: {\n    product: decode(a[2]),\n    url: BASE + a[1].replace(/^(\\.\\.\\/)+/, ''),\n    price: Number(p[1]),\n    in_stock: /In stock/i.test(c),\n  } });\n}\nif (!out.length) throw new Error('No products found - the page layout may have changed');\nreturn out;"
+      },
+      "id": "d87d0a66-c9d0-4d1f-8519-98bc2c0b4ddd",
+      "name": "Parse Products",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ENeYoQTefXd4dfAF",
+          "mode": "list",
+          "cachedResultName": "competitor_prices",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/ENeYoQTefXd4dfAF"
+        },
+        "returnAll": true
+      },
+      "id": "b26dfa9c-cba0-4afc-a423-e5c932d129a6",
+      "name": "Load Last Prices",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        100
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compare today's prices with the last saved ones.\nconst last = new Map($('Load Last Prices').all().map(i => i.json).filter(r => r.product).map(r => [r.product, r]));\nconst now = DateTime.now().setZone('Asia/Ho_Chi_Minh').toFormat('yyyy-LL-dd HH:mm');\nreturn $('Parse Products').all().map(({ json: p }) => {\n  const prev = last.get(p.product);\n  const change = prev ? Math.round((p.price - prev.price) * 100) / 100 : null;\n  let status = 'new';\n  if (prev) status = change !== 0 ? 'price_changed' : (prev.in_stock !== p.in_stock ? 'stock_changed' : 'same');\n  return { json: { ...p, prev_price: prev ? prev.price : null, change, change_pct: prev && prev.price ? Math.round(change / prev.price * 1000) / 10 : null, status, last_checked: now } };\n});"
+      },
+      "id": "662e981b-aad5-453b-99b8-3930456fb314",
+      "name": "Compare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "ENeYoQTefXd4dfAF",
+          "mode": "list",
+          "cachedResultName": "competitor_prices",
+          "cachedResultUrl": "/projects/gY8Fh8Cme18zq6oq/datatables/ENeYoQTefXd4dfAF"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "product",
+              "condition": "eq",
+              "keyValue": "={{ $json.product }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "product": "={{ $json.product }}",
+            "url": "={{ $json.url }}",
+            "price": "={{ $json.price }}",
+            "in_stock": "={{ $json.in_stock }}",
+            "last_checked": "={{ $json.last_checked }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "product",
+              "displayName": "product",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "price",
+              "displayName": "price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "in_stock",
+              "displayName": "in_stock",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "last_checked",
+              "displayName": "last_checked",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ab755123-0619-4154-abc8-52bf770f32bf",
+      "name": "Save Prices",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One Telegram message listing only what changed.\nconst rows = $('Compare').all().map(i => i.json);\nconst changed = rows.filter(r => r.status === 'price_changed' || r.status === 'stock_changed');\nif (!changed.length) return [];\nconst fmt = n => '£' + n.toFixed(2);\nconst lines = changed.map(r => r.status === 'price_changed'\n  ? `- ${r.product}: ${fmt(r.prev_price)} -> ${fmt(r.price)} (${r.change > 0 ? '+' : ''}${r.change_pct}%)`\n  : `- ${r.product}: now ${r.in_stock ? 'back in stock' : 'OUT OF STOCK'}`);\nconst drops = changed.filter(r => r.change < 0).length;\nreturn [{ json: { changes: changed.length, alert: `COMPETITOR PRICE WATCH\\n${changed.length} change(s) across ${rows.length} tracked products${drops ? ' - ' + drops + ' price drop(s), consider matching' : ''}:\\n${lines.join('\\n')}` } }];"
+      },
+      "id": "cce6789d-8f5c-4dc1-b5e8-001a98e5e090",
+      "name": "Build Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        100
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ (String(($json.alert) ?? '')).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "d8646d8b-17c2-4e11-9689-334b9212228b",
+      "name": "Alert (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1540,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "webhookId": "7f14600c-e1e7-466d-870b-f4cef028b6dd"
+    }
+  ],
+  "connections": {
+    "Run Check": {
+      "main": [
+        [
+          {
+            "node": "Fetch Competitor Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Day 7 AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Competitor Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Competitor Page": {
+      "main": [
+        [
+          {
+            "node": "Parse Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Products": {
+      "main": [
+        [
+          {
+            "node": "Load Last Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Last Prices": {
+      "main": [
+        [
+          {
+            "node": "Compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare": {
+      "main": [
+        [
+          {
+            "node": "Save Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Prices": {
+      "main": [
+        [
+          {
+            "node": "Build Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert": {
+      "main": [
+        [
+          {
+            "node": "Alert (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}

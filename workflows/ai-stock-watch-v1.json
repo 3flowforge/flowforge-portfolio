@@ -1,0 +1,390 @@
+{
+  "name": "portfolio-ai-stock-watch-v1",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "c093ad6d-35cd-20cb-ad0a-b0b3a348bf4e",
+      "name": "Run Now",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 2-6"
+            }
+          ]
+        }
+      },
+      "id": "078cc152-aecf-72c4-32f5-3418b3a25dd5",
+      "name": "Weekdays 7 AM (after US close)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Watchlist: edit this list for a client. One item per ticker goes to \"Fetch Prices\".\n// group: focus = full block at the top · investor = big Anthropic backers · ai = AI sector\n// ipoPrice (optional): shows \"since IPO\" for new listings.\nconst WATCHLIST = [\n  { symbol: 'ANT',   name: 'Anthropic', group: 'focus', ipoPrice: 83 },\n  { symbol: 'AMZN',  name: 'Amazon',    group: 'investor' },\n  { symbol: 'GOOGL', name: 'Alphabet',  group: 'investor' },\n  { symbol: 'NVDA',  name: 'Nvidia',    group: 'ai' },\n  { symbol: 'MSFT',  name: 'Microsoft', group: 'ai' },\n  { symbol: 'META',  name: 'Meta',      group: 'ai' },\n  { symbol: 'AMD',   name: 'AMD',       group: 'ai' },\n  { symbol: 'AVGO',  name: 'Broadcom',  group: 'ai' },\n  { symbol: 'TSM',   name: 'TSMC',      group: 'ai' },\n  { symbol: 'PLTR',  name: 'Palantir',  group: 'ai' }\n];\nreturn WATCHLIST.map(w => ({ json: w }));\n"
+      },
+      "id": "1a553418-c2cb-322b-83a9-a69986c13315",
+      "name": "Watchlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent($json.symbol) + '?range=1mo&interval=1d' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 400
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "d9e2580b-c733-cc67-d30d-0fc44643dd22",
+      "name": "Fetch Prices (Yahoo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compute Stats: turns Yahoo chart responses into one clean row per ticker.\n// Pairs each response with its watchlist item by position (the HTTP node keeps the order).\nconst BIG_MOVE_PCT = 5; // flag moves of ±5% or more in one day\nconst watch = $('Watchlist').all().map(i => i.json);\nconst responses = $input.all().map(i => i.json);\n\nconst pct = (a, b) => (a != null && b ? ((a - b) / b) * 100 : null);\nconst round = (x, d = 2) => (x == null || isNaN(x) ? null : Math.round(x * 10 ** d) / 10 ** d);\n\nfunction parse(w, res) {\n  const r = res && res.chart && res.chart.result && res.chart.result[0];\n  if (!r) {\n    const why = (res && res.chart && res.chart.error && res.chart.error.description)\n      || (res && res.error && (res.error.message || res.error)) || 'no data';\n    return { ...w, ok: false, error: String(why).slice(0, 120) };\n  }\n  const q = r.indicators.quote[0];\n  const bars = (r.timestamp || [])\n    .map((t, i) => ({ t, close: q.close[i], volume: q.volume[i] }))\n    .filter(b => b.close != null);\n  if (!bars.length) return { ...w, ok: false, error: 'no closing prices' };\n\n  const last = bars[bars.length - 1];\n  // First trading day: compare with the IPO price.\n  const prev = bars.length > 1 ? bars[bars.length - 2].close : (w.ipoPrice || r.meta.chartPreviousClose);\n  const weekAgo = bars.length > 5 ? bars[bars.length - 6].close : null;\n  const monthStart = bars.length > 15 ? bars[0].close : null;\n  const prevVols = bars.slice(0, -1).map(b => b.volume).filter(Boolean);\n  const avgVol = prevVols.length ? prevVols.reduce((a, b) => a + b, 0) / prevVols.length : null;\n  const day = pct(last.close, prev);\n\n  return {\n    ...w,\n    ok: true,\n    currency: r.meta.currency || 'USD',\n    date: new Date(last.t * 1000).toISOString().slice(0, 10),\n    close: round(last.close),\n    dayPct: round(day),\n    weekPct: round(pct(last.close, weekAgo)),\n    monthPct: round(pct(last.close, monthStart)),\n    sinceIpoPct: w.ipoPrice ? round(pct(last.close, w.ipoPrice)) : null,\n    high52: r.meta.fiftyTwoWeekHigh != null ? round(r.meta.fiftyTwoWeekHigh) : null,\n    low52: r.meta.fiftyTwoWeekLow != null ? round(r.meta.fiftyTwoWeekLow) : null,\n    volume: last.volume,\n    volVsAvg: avgVol ? round(last.volume / avgVol, 1) : null,\n    tradingDays: bars.length,\n    bigMove: day != null && Math.abs(day) >= BIG_MOVE_PCT\n  };\n}\n\nreturn watch.map((w, i) => ({ json: parse(w, responses[i]) }));\n"
+      },
+      "id": "ca511330-6001-da0f-7f07-a6f02a326f4e",
+      "name": "Compute Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// News Queries: one Google News RSS search per topic (last 24 hours, English, US edition).\n// For a paying client, swap this for a licensed news API (see README).\nconst TOPICS = [\n  { topic: 'anthropic', label: 'Anthropic', q: '(Anthropic OR \"ANT stock\" OR \"Claude AI\") when:1d', max: 6 },\n  // exclude: skip headlines with these words (Anthropic stories already have their own section)\n  { topic: 'ai', label: 'AI stocks', exclude: ['anthropic'], q: '(\"AI stocks\" OR \"Nvidia stock\" OR \"Nvidia shares\" OR \"chip stocks\" OR \"AI bubble\") when:1d', max: 6 }\n];\nreturn TOPICS.map(t => ({\n  json: { ...t, url: 'https://news.google.com/rss/search?q=' + encodeURIComponent(t.q) + '&hl=en-US&gl=US&ceid=US:en' }\n}));\n"
+      },
+      "id": "ecd058cb-0396-d352-eb6e-5a2b3faa1ac6",
+      "name": "News Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "id": "ed06fd7f-bc8a-4099-ebad-0d73d2d5e622",
+      "name": "Fetch News (Google News RSS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse News: RSS → headlines. Drops duplicates (across topics and vs. the last 3 days),\n// then returns ONE item with the prompt for the AI brief, so the flow never stops on a quiet day.\nconst topics = $('News Queries').all().map(i => i.json);\nconst feeds = $input.all().map(i => i.json);\nconst stats = $('Compute Stats').all().map(i => i.json);\n\nconst decode = s => String(s || '')\n  .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')\n  .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n  .replace(/&quot;/g, '\"').replace(/&#39;/g, \"'\").replace(/&nbsp;/g, ' ').trim();\nconst tag = (xml, t) => {\n  const m = xml.match(new RegExp('<' + t + '[^>]*>([\\\\s\\\\S]*?)</' + t + '>'));\n  return m ? decode(m[1]) : '';\n};\n// Same story from two outlets usually shares its first long words.\nconst key = title => title.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(' ')\n  .filter(w => w.length > 3).slice(0, 6).join(' ');\n\n// Remember headlines already sent (kept only in production runs, not manual tests).\nconst store = $getWorkflowStaticData('global');\nconst now = Date.now();\nconst seen = store.seenNews || {};\nfor (const k of Object.keys(seen)) if (now - seen[k] > 3 * 864e5) delete seen[k];\n\nconst used = new Set();\nconst out = {};\nconst errors = [];\ntopics.forEach((t, i) => {\n  const xml = feeds[i] && typeof feeds[i].data === 'string' ? feeds[i].data : '';\n  if (!xml.includes('<rss')) errors.push(t.label + ' feed not reached');\n  const items = (xml.match(/<item>[\\s\\S]*?<\\/item>/g) || []).map(x => {\n    let title = tag(x, 'title');\n    const source = tag(x, 'source');\n    if (source && title.endsWith(' - ' + source)) title = title.slice(0, -(source.length + 3));\n    const d = new Date(tag(x, 'pubDate'));\n    return { title, source, link: tag(x, 'link'), published: isNaN(d) ? '' : d.toISOString() };\n  }).filter(n => n.title && n.link);\n  items.sort((a, b) => b.published.localeCompare(a.published));\n  out[t.topic] = [];\n  const exclude = (t.exclude || []).map(w => w.toLowerCase());\n  for (const n of items) {\n    const k = key(n.title);\n    if (!k || used.has(k) || seen[k]) continue;\n    if (exclude.some(w => n.title.toLowerCase().includes(w))) continue;\n    used.add(k);\n    out[t.topic].push(n);\n    if (out[t.topic].length >= t.max) break;\n  }\n});\nfor (const k of used) seen[k] = now;\nstore.seenNews = seen;\n\nconst fmt = s => s.ok\n  ? `${s.symbol} (${s.name}) close ${s.close} ${s.currency}, day ${s.dayPct}%`\n    + (s.weekPct != null ? `, 5d ${s.weekPct}%` : '')\n    + (s.sinceIpoPct != null ? `, since IPO ${s.sinceIpoPct}% (trading day ${s.tradingDays})` : '')\n    + (s.volVsAvg != null ? `, volume ${s.volVsAvg}x average` : '')\n  : `${s.symbol}: no data`;\nconst list = arr => arr.map((n, i) => `${i + 1}. ${n.title} (${n.source})`).join('\\n') || 'none';\n\nconst prompt = [\n  'PRICES (last US close):', stats.map(fmt).join('\\n'),\n  '', 'ANTHROPIC HEADLINES (24h):', list(out.anthropic || []),\n  '', 'AI SECTOR HEADLINES (24h):', list(out.ai || [])\n].join('\\n');\n\nreturn [{ json: { anthropic: out.anthropic || [], ai: out.ai || [], errors, prompt } }];\n"
+      },
+      "id": "27bd6970-217c-0f1c-7adb-c485ea065cf9",
+      "name": "Parse News",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are a markets news editor writing a short daily note for a Telegram channel.\nUse ONLY the prices and headlines given. Never invent numbers, events or quotes.\nExplain what moved and the most likely reason from the headlines; if no headline explains a move, say the cause is unclear.\nDo NOT give investment advice: no buy/sell/hold calls, no price targets, no predictions.\nPlain English, no markdown, no emojis. Respect the length limits in the schema."
+            }
+          ]
+        }
+      },
+      "id": "be8d589d-986e-2a8a-4d18-36be8859ad37",
+      "name": "Write Brief (AI)",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        1540,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.5-flash",
+        "options": {
+          "maxOutputTokens": 2048,
+          "temperature": 0.2
+        }
+      },
+      "id": "bc6dc2dc-ba19-2113-dff4-b0eaec681bec",
+      "name": "Gemini",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1480,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"headline\": {\n      \"type\": \"string\",\n      \"description\": \"One sentence, max 110 characters: the main story of the day\"\n    },\n    \"anthropic\": {\n      \"type\": \"string\",\n      \"description\": \"Max 2 sentences (280 characters) on Anthropic (ANT): price move and the news behind it\"\n    },\n    \"ai_market\": {\n      \"type\": \"string\",\n      \"description\": \"Max 2 sentences (280 characters) on AI stocks overall: leaders, laggards, theme of the day\"\n    },\n    \"watch\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      },\n      \"description\": \"0 to 3 upcoming events or open questions named in the headlines (earnings dates, lock-up, index inclusion). Max 90 characters each. Empty if none.\"\n    }\n  },\n  \"required\": [\n    \"headline\",\n    \"anthropic\",\n    \"ai_market\",\n    \"watch\"\n  ]\n}"
+      },
+      "id": "4ecc2336-076e-701b-e229-346d0653be1c",
+      "name": "Brief Schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.2,
+      "position": [
+        1660,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Message: Telegram HTML. Works with or without the AI brief.\n// Splits into several messages if longer than Telegram's 4,096-character limit.\nconst stats = $('Compute Stats').all().map(i => i.json);\nconst news = $('Parse News').first().json;\nconst ai = $input.first().json;\nconst brief = ai && ai.output && typeof ai.output === 'object' ? ai.output : null;\n\nconst esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst sign = x => (x == null ? 'n/a' : (x > 0 ? '+' : '') + x.toFixed(2) + '%');\nconst arrow = x => (x == null ? '▫️' : x >= 0 ? '🟢' : '🔴');\nconst money = x => '$' + Number(x).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\nconst vol = v => (v >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : String(v || 0));\n\nconst ok = stats.filter(s => s.ok);\nconst failed = stats.filter(s => !s.ok);\nconst day = ok.length ? ok.map(s => s.date).sort().pop() : new Date().toISOString().slice(0, 10);\nconst lines = [`📈 <b>AI Stock Watch</b> · US close ${day}`];\n\nif (brief && brief.headline) lines.push('', '<b>' + esc(brief.headline) + '</b>');\n\nfor (const s of ok.filter(x => x.group === 'focus')) {\n  lines.push('', `${arrow(s.dayPct)} <b>${esc(s.name)} (${s.symbol})</b> ${money(s.close)}  <b>${sign(s.dayPct)}</b>`);\n  const extra = [];\n  if (s.sinceIpoPct != null) extra.push(`since IPO ${sign(s.sinceIpoPct)} (IPO ${money(s.ipoPrice)}, trading day ${s.tradingDays})`);\n  if (s.weekPct != null) extra.push(`5d ${sign(s.weekPct)}`);\n  if (s.high52 != null) extra.push(`range ${money(s.low52)}–${money(s.high52)}`);\n  extra.push(`vol ${vol(s.volume)}${s.volVsAvg ? ` (${s.volVsAvg}x avg)` : ''}`);\n  lines.push(extra.join(' · '));\n  if (brief && brief.anthropic) lines.push('<i>' + esc(brief.anthropic) + '</i>');\n}\n\nconst others = ok.filter(x => x.group !== 'focus').sort((a, b) => (b.dayPct ?? -999) - (a.dayPct ?? -999));\nif (others.length) {\n  lines.push('', '<b>AI stocks</b> (close · day · 5 days)');\n  for (const s of others) {\n    lines.push(`${arrow(s.dayPct)} <code>${s.symbol.padEnd(5)}</code> ${money(s.close)} · ${sign(s.dayPct)} · ${sign(s.weekPct)}`\n      + (s.bigMove ? ' ⚠️' : '') + (s.group === 'investor' ? ' 🤝' : ''));\n  }\n  lines.push('<i>🤝 major Anthropic investor · ⚠️ moved 5%+ today</i>');\n}\nif (brief && brief.ai_market) lines.push('', '🧭 ' + esc(brief.ai_market));\nif (brief && Array.isArray(brief.watch) && brief.watch.length) {\n  lines.push('', '<b>Worth watching</b>', ...brief.watch.slice(0, 3).map(w => '• ' + esc(w)));\n}\n\nconst newsBlock = (title, arr) => (arr.length\n  ? ['', `<b>${title}</b>`, ...arr.map(n => `• <a href=\"${esc(n.link)}\">${esc(n.title)}</a> <i>(${esc(n.source)})</i>`)]\n  : []);\nlines.push(...newsBlock('📰 Anthropic news', news.anthropic || []));\nlines.push(...newsBlock('📰 AI sector news', news.ai || []));\n\nconst problems = [];\nif (failed.length) problems.push('no price for ' + failed.map(f => f.symbol).join(', '));\nif (news.errors && news.errors.length) problems.push(news.errors.join(', '));\nif (!brief) problems.push('AI brief skipped');\nif (problems.length) lines.push('', '⚙️ <i>' + esc(problems.join(' · ')) + '</i>');\nlines.push('', '<i>Automated summary of public data. Not financial advice.</i>');\n\n// Telegram counts 4,096 characters AFTER removing tags (link URLs do not count).\n// Split on line boundaries, keeping a margin.\nconst visible = s => s.replace(/<[^>]+>/g, '').replace(/&lt;|&gt;|&amp;/g, 'x').length;\nconst chunks = [];\nlet cur = '';\nfor (const l of lines) {\n  if (cur && visible(cur + '\\n' + l) > 3900) { chunks.push(cur); cur = l; } else cur = cur ? cur + '\\n' + l : l;\n}\nif (cur) chunks.push(cur);\nreturn chunks.map((text, i) => ({ json: { text, part: i + 1, parts: chunks.length } }));\n"
+      },
+      "id": "d007c8fe-6157-6ffc-b11b-3465c954c79c",
+      "name": "Build Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "a2cafd44-b191-2727-3c9e-4e46f2496642",
+      "name": "Send to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "webhookId": "05e11623-820f-dfe0-459e-c0f4b85b16d7"
+    }
+  ],
+  "connections": {
+    "Run Now": {
+      "main": [
+        [
+          {
+            "node": "Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekdays 7 AM (after US close)": {
+      "main": [
+        [
+          {
+            "node": "Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Watchlist": {
+      "main": [
+        [
+          {
+            "node": "Fetch Prices (Yahoo)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Prices (Yahoo)": {
+      "main": [
+        [
+          {
+            "node": "Compute Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Stats": {
+      "main": [
+        [
+          {
+            "node": "News Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News Queries": {
+      "main": [
+        [
+          {
+            "node": "Fetch News (Google News RSS)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch News (Google News RSS)": {
+      "main": [
+        [
+          {
+            "node": "Parse News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse News": {
+      "main": [
+        [
+          {
+            "node": "Write Brief (AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Brief (AI)": {
+      "main": [
+        [
+          {
+            "node": "Build Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Message": {
+      "main": [
+        [
+          {
+            "node": "Send to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write Brief (AI)",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Brief Schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write Brief (AI)",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "pinData": {}
+}
