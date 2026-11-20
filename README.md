@@ -6,6 +6,8 @@
 
 I'm Hoa Phan, an AI automation engineer based in Vietnam (GMT+7). I build **n8n + AI** workflows (Claude, Gemini, DeepSeek) that save small businesses and e-commerce stores hours of repetitive work every week.
 
+[![Hire me on Upwork](https://img.shields.io/badge/Hire%20me%20on-Upwork-14a800?logo=upwork&logoColor=white)](https://www.upwork.com/freelancers/~0181d19cd224c54971)
+
 ## Projects
 
 | Project | What it does | Stack |
@@ -58,4 +60,4 @@ Sample (fictional) data for every project is in [`sample-data/`](sample-data/).
 
 ## Hire me
 
-Find me on Upwork (link coming soon) or email **3flowforge@gmail.com**.
+Hire me on **[Upwork](https://www.upwork.com/freelancers/~0181d19cd224c54971)** or email **3flowforge@gmail.com**.
